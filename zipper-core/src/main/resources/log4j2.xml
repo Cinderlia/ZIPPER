@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration>
+    <Properties>
+        <Property name="log.pattern">[%p %d{MM-dd HH:mm:ss}] %m%n</Property>
+        <Property name="file.err.filename">output/log/err.log</Property>
+    </Properties>
+    <Appenders>
+        <Console name="console" target="SYSTEM_OUT">
+            <PatternLayout pattern="${log.pattern}"/>
+        </Console>
+        <File name="err" bufferedIO="true" fileName="${file.err.filename}">
+            <PatternLayout pattern="${log.pattern}"/>
+        </File>
+    </Appenders>
+    <Loggers>
+        <Root level="info">
+            <AppenderRef ref="console"/>
+        </Root>
+    </Loggers>
+</Configuration>

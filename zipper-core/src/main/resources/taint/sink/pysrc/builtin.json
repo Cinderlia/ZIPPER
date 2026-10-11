@@ -1,0 +1,29 @@
+{
+  "PYTHONSRC": {
+    "Xss": {
+      "functions": [],
+      "methods": []
+    },
+    "CmdInjection": {
+      "functions": [],
+      "methods": [
+        {
+          "receiverName": "os",
+          "methodName": "system"
+        }
+      ]
+    },
+    "CodeInjection": {
+      "functions": [],
+      "methods": []
+    },
+    "SqlInjection": {
+      "functions": [],
+      "methods": []
+    },
+    "FileInclusion": {
+      "functions": [],
+      "methods": []
+    }
+  }
+}

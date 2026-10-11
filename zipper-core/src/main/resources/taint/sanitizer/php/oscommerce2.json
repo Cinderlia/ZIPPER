@@ -1,0 +1,35 @@
+{
+  "PHP": {
+    "typeSanitizer": [],
+    "genericSanitizer": [
+      "display_links",
+      "zen_db_prepare_input"
+    ],
+    "vulnSanitizer": {
+      "Xss": {
+        "functions": [
+          "zen_parse_input_field_data",
+          "tep_output_string_protected",
+          "tep_output_string"
+        ],
+        "methods": [],
+        "regexes": []
+      },
+      "CmdInjection": {
+        "functions": [],
+        "methods": [],
+        "regexes": []
+      },
+      "SqlInjection": {
+        "functions": [],
+        "methods": [],
+        "regexes": []
+      },
+      "FileInclusion": {
+        "functions": [],
+        "methods": [],
+        "regexes": []
+      }
+    }
+  }
+}

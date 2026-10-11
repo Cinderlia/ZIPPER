@@ -1,0 +1,148 @@
+{
+  "PHP": {
+    "typeSanitizer": [
+      "<operator>.plus",
+      "<operator>.minus",
+      "<operator>.multiplication",
+      "<operator>.division",
+      "<operator>.modulo",
+      "<operator>.cast",
+      "<operator>.equals",
+      "<operator>.notEquals",
+      "<operator>.identical",
+      "<operator>.notIdentical",
+      "<operator>.spaceship",
+      "constant",
+      "define",
+      "empty",
+      "is_bool",
+      "is_double",
+      "is_float",
+      "is_real",
+      "is_long",
+      "is_int",
+      "is_integer",
+      "is_null",
+      "is_numeric",
+      "is_finite",
+      "is_infinite",
+      "isset",
+      "ctype_alnum",
+      "ctype_alpha",
+      "ctype_cntrl",
+      "ctype_digit",
+      "ctype_xdigit",
+      "ctype_upper",
+      "ctype_lower",
+      "ctype_space",
+      "in_array",
+      "intval",
+      "floatval",
+      "doubleval",
+      "round",
+      "floor",
+      "strlen",
+      "strrpos",
+      "strpos",
+      "strftime",
+      "strtotime",
+      "md5",
+      "md5_file",
+      "sha1",
+      "sha1_file",
+      "crypt",
+      "crc32",
+      "hash",
+      "mhash",
+      "hash_hmac",
+      "password_hash",
+      "sizeof",
+      "count",
+      "levenshtein",
+      "abs",
+      "bindec",
+      "decbin",
+      "dechex",
+      "decoct",
+      "hexdec",
+      "rand",
+      "metaphone",
+      "tempnam",
+      "soundex",
+      "money_format",
+      "number_format",
+      "date_format",
+      "filetype",
+      "nl_langinfo",
+      "getservbyport",
+      "getprotobynumber",
+      "filesize",
+      "mktime",
+      "is_writable"
+    ],
+    "genericSanitizer": [
+      "dirname",
+      "number_format",
+      "json_encode",
+      "date",
+      "filter_var",
+      "filter_input",
+      "gettype"
+    ],
+    "vulnSanitizer": {
+      "Xss": {
+        "functions": [
+          "htmlspecialchars",
+          "htmlentities",
+          "strip_tags",
+          "rawurlencode",
+          "urlencode"
+        ],
+        "methods": [],
+        "regexes": [
+          "/[<>]/",
+          "/[^a-zA-Z_]/",
+          "/^0-9a-zA-Z_/"
+        ]
+      },
+      "CmdInjection": {
+        "functions": [
+          "escapeshellarg",
+          "escapeshellcmd"
+        ],
+        "methods": [],
+        "regexes": []
+      },
+      "SqlInjection": {
+        "functions": [
+          "addslashes",
+          "mysqli_real_escape_string",
+          "mysqli_escape_string",
+          "mysql_escape_string"
+        ],
+        "methods": [
+          {
+            "typeName": "mysqli",
+            "methodName": "escape_string"
+          },
+          {
+            "typeName": "mysqli",
+            "methodName": "real_escape_string"
+          }
+        ],
+        "regexes": []
+      },
+      "FileInclusion": {
+        "functions": [
+          "dirname",
+          "basename"
+        ],
+        "methods": [],
+        "regexes": [
+          "/[^a-zA-Z_]/",
+          "/[^a-z0-9_]/"
+        ]
+      }
+    }
+  }
+}

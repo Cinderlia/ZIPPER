@@ -1,0 +1,42 @@
+{
+  "PHP": {
+    "typeSanitizer": [],
+    "genericSanitizer": [
+      "zen_db_input"
+    ],
+    "vulnSanitizer": {
+      "Xss": {
+        "functions": [
+          "zen_draw_hidden_field",
+          "zen_image"
+        ],
+        "methods": [],
+        "regexes": []
+      },
+      "CmdInjection": {
+        "functions": [],
+        "methods": [],
+        "regexes": []
+      },
+      "SqlInjection": {
+        "functions": [],
+        "methods": [
+          {
+            "receiverName": "$db",
+            "methodName": "bindVars"
+          },
+          {
+            "receiverName": "$this",
+            "methodName": "getBindVarValue"
+          }
+        ],
+        "regexes": []
+      },
+      "FileInclusion": {
+        "functions": [],
+        "methods": [],
+        "regexes": []
+      }
+    }
+  }
+}

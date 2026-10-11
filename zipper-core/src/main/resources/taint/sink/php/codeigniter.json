@@ -1,0 +1,55 @@
+{
+  "PHP": {
+    "Xss": {
+      "functions": [],
+      "methods": [
+        {
+          "methodName": "view",
+          "receiverName": "$this->load",
+          "args": [2]
+        }
+      ]
+    },
+    "CmdInjection": {
+      "functions": [],
+      "methods": []
+    },
+    "CodeInjection": {
+      "functions": [],
+      "methods": []
+    },
+    "SqlInjection": {
+      "functions": [],
+      "methods": [
+        {
+          "methodName": "query",
+          "args": [1]
+        },
+        {
+          "methodName": "simple_query",
+          "receiverName": "$this->db",
+          "args": [1]
+        },
+        {
+          "methodName": "select",
+          "receiverName": "$this->db",
+          "args": [1]
+        },
+        {
+          "methodName": "from",
+          "receiverName": "$this->db",
+          "args": [1]
+        },
+        {
+          "methodName": "where",
+          "receiverName": "$this->db",
+          "args": [1]
+        }
+      ]
+    },
+    "FileInclusion": {
+      "functions": [],
+      "methods": []
+    }
+  }
+}

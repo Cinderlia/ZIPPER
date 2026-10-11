@@ -1,0 +1,68 @@
+{
+  "PHP": {
+    "typeSanitizer": [
+      "is_php",
+      "is_really_writable"
+    ],
+    "genericSanitizer": [],
+    "vulnSanitizer": {
+      "Xss": {
+        "functions": [
+          "html_escape"
+        ],
+        "methods": [
+          {
+            "receiverName": "$this->security",
+            "methodName": "xss_clean"
+          },
+          {
+            "receiverName": "$this",
+            "methodName": "escape"
+          }
+        ],
+        "regexes": []
+      },
+      "CmdInjection": {
+        "functions": [],
+        "methods": [
+          {
+            "receiverName": "$this->db",
+            "methodName": "escape"
+          },
+          {
+            "receiverName": "$this->db",
+            "methodName": "escape_str"
+          },
+          {
+            "receiverName": "$this->db",
+            "methodName": "escape_like_str"
+          }
+        ],
+        "regexes": []
+      },
+      "SqlInjection": {
+        "functions": [],
+        "methods": [
+          {
+            "receiverName": "$this->db",
+            "methodName": "escape"
+          },
+          {
+            "receiverName": "$this->db",
+            "methodName": "escape_str"
+          },
+          {
+            "receiverName": "$this->db",
+            "methodName": "escape_like_str"
+          }
+        ],
+        "regexes": []
+      },
+      "FileInclusion": {
+        "functions": [],
+        "methods": [],
+        "regexes": []
+      }
+    }
+  }
+}

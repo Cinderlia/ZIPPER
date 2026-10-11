@@ -1,0 +1,138 @@
+{
+  "PHP" : {
+    "globals" : [
+    ],
+    "functions" : [
+      "wp_get_original_referer",
+      "get_http_origin",
+      "get_search_query",
+      "get_query_var",
+      "wp_get_raw_referer",
+      "wp_parse_auth_cookie",
+      "wp_get_unapproved_comment_author_email",
+      "wp_get_referer"
+    ],
+    "methods" : [
+      {
+        "typeName" : "WP_REST_Attachments_Controller",
+        "receiverName" : null,
+        "methodName" : "upload_from_file"
+      },
+      {
+        "typeName" : "WP_REST_Attachments_Controller",
+        "receiverName" : null,
+        "methodName" : "upload_from_data"
+      },
+      {
+        "typeName" : "WP_Customize_Widgets",
+        "receiverName" : null,
+        "methodName" : "get_post_value"
+      },
+      {
+        "typeName" : "WP_oEmbed_Controller",
+        "receiverName" : null,
+        "methodName" : "get_item"
+      },
+      {
+        "typeName" : "WP_oEmbed_Controller",
+        "receiverName" : null,
+        "methodName" : "get_proxy_item"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_param"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_json_params"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_params"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "offsetGet"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_file_params"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_body"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_body_params"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_headers"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_query_params"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_header"
+      },
+      {
+        "typeName" : "WP_REST_Request",
+        "receiverName" : null,
+        "methodName" : "get_url_params"
+      },
+      {
+        "typeName" : "WP_REST_Server",
+        "receiverName" : null,
+        "methodName" : "get_headers"
+      },
+      {
+        "typeName" : "WP_REST_Server",
+        "receiverName" : null,
+        "methodName" : "get_raw_data"
+      },
+      {
+        "typeName" : "WP_Customize_Setting",
+        "receiverName" : null,
+        "methodName" : "post_value"
+      },
+      {
+        "typeName" : "WP_Query",
+        "receiverName" : "$wp_query",
+        "methodName" : "get"
+      },
+      {
+        "typeName" : "WP_Community_Events",
+        "receiverName" : null,
+        "methodName" : "get_unsafe_client_ip"
+      },
+      {
+        "typeName" : "WP_Customize_Manager",
+        "receiverName" : "$wp_customize",
+        "methodName" : "post_value"
+      },
+      {
+        "typeName" : "WP_Customize_Manager",
+        "receiverName" : "$wp_customize",
+        "methodName" : "add_dynamic_settings"
+      },
+      {
+        "typeName" : "WP_Customize_Manager",
+        "receiverName" : "$wp_customize",
+        "methodName" : "unsanitized_post_values"
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "PHP": {
+    "typeSanitizer": [],
+    "genericSanitizer": [],
+    "vulnSanitizer": {
+      "Xss": {
+        "functions": [
+          "_"
+        ],
+        "methods": [
+          {
+            "receiverName": "$request",
+            "methodName": "getCmd"
+          }
+        ],
+        "regexes": []
+      },
+      "CmdInjection": {
+        "functions": [],
+        "methods": [],
+        "regexes": []
+      },
+      "SqlInjection": {
+        "functions": [],
+        "methods": [],
+        "regexes": []
+      },
+      "FileInclusion": {
+        "functions": [],
+        "methods": [],
+        "regexes": []
+      }
+    }
+  }
+}

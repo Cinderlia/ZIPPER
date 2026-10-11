@@ -1,0 +1,182 @@
+{
+  "PHP": {
+    "typeSanitizer": [
+      "wp_localize_script",
+      "absint",
+      "rest_sanitize_boolean",
+      "is_email", 
+      "validate_file",
+      "validate_plugin"
+    ],
+    "genericSanitizer": [
+      "rest_sanitize_value_from_schema",
+      "rest_sanitize_request_arg",
+      "sanitize_option",
+      "sanitize_meta",
+      "sanitize_term_field",
+      "_deep_replace",
+      "_get_plugin_data_markup_translate",
+      "antispambot",
+      "get_term_to_edit",
+      "number_format_i18n",
+      "rest_parse_request_arg",
+      "sanitize_category",
+      "sanitize_category_field",
+      "sanitize_email",
+      "sanitize_hex_color",
+      "sanitize_hex_color_no_hash",
+      "sanitize_key",
+      "sanitize_mime_type",
+      "sanitize_post",
+      "sanitize_meta",
+      "sanitize_term",
+      "sanitize_term_field",
+      "sanitize_text_field",
+      "sanitize_textarea_field",
+      "sanitize_title",
+      "sanitize_title_with_dashes",
+      "sanitize_title_for_query",
+      "sanitize_user",
+      "remove_query_arg",
+      "maybe_hash_hex_color",
+      "sync_category_tag_slugs",
+      "taxonomy_meta_box_sanitize_cb_checkboxes",
+      "taxonomy_meta_box_sanitize_cb_input",
+      "twentyfifteen_sanitize_color_scheme",
+      "twentyfourteen_sanitize_layout",
+      "twentyseventeen_sanitize_colorscheme",
+      "twentyseventeen_sanitize_page_layout",
+      "twentysixteen_sanitize_color_scheme",
+      "twentyeleven_theme_options_validate",
+      "twentynineteen_sanitize_color_option",
+      "urlencode_deep",
+      "wp_check_invalid_utf8",
+      "wp_json_encode",
+      "wp_parse_list",
+      "wp_parse_slug_list",
+      "wp_sanitize_redirect",
+      "wp_staticize_emoji"
+    ],
+    "vulnSanitizer": {
+      "Xss": {
+        "functions": [
+          "attribute_escape",
+          "convert_chars",
+          "esc_attr",
+          "esc_attr__",
+          "esc_attr_e",
+          "esc_attr_x",
+          "esc_html",
+          "esc_html__",
+          "esc_html_e",
+          "esc_html_x",
+          "esc_js",
+          "esc_textarea",
+          "esc_url",
+          "esc_url_raw",
+          "esc_xml",
+          "filter_block_content",
+          "filter_block_kses",
+          "filter_block_kses_value",
+          "format_for_editor",
+          "format_to_edit",
+          "funky_javascript_fix",
+          "htmlentities2",
+          "js_escape",
+          "balanceTags",
+          "force_balance_tags",
+          "clean_url",
+          "ent2ncr",
+          "the_title_attribute",
+          "wp_filter_post_kses",
+          "wp_kses_attr",
+          "wp_kses_attr_check",
+          "wp_kses_hair",
+          "wp_kses_hook",
+          "wp_kses_post_deep",
+          "wp_kses_split",
+          "wp_kses_stripslashes",
+          "sanitize_html_class",
+          "sanitize_url",
+          "tag_escape",
+          "wp_check_jsonp_callback",
+          "wp_htmledit_pre",
+          "wp_kses",
+          "wp_kses_allowed_html",
+          "wp_kses_bad_protocol",
+          "wp_kses_bad_protocol_once",
+          "wp_kses_data",
+          "wp_kses_decode_entities",
+          "wp_kses_js_entities",
+          "wp_kses_named_entities",
+          "wp_kses_no_null",
+          "wp_kses_normalize_entities",
+          "wp_kses_normalize_entities2",
+          "wp_kses_normalize_entities3",
+          "wp_kses_post",
+          "wp_kses_split2",
+          "wp_pre_kses_block_attributes",
+          "wp_filter_nohtml_kses",
+          "wp_filter_oembed_result",
+          "wp_specialchars",
+          "wp_strip_all_tags"
+        ],
+        "methods": [
+          { "typeName": "SimplePie_Item", "receiverName": null, "methodName": "sanitize" },
+          { "typeName": "WP_Theme", "receiverName": null, "methodName": "sanitize_header" },
+          { "typeName": "WP_SimplePie_Sanitize_KSES", "receiverName": null, "methodName": "sanitize" },
+          { "typeName": "SimplePie_Sanitize", "receiverName": null, "methodName": "sanitize" },
+          { "typeName": "WP_Widget_Media", "receiverName": null, "methodName": "sanitize_token_list" },
+          { "typeName": "Text_Diff_Renderer_inline", "receiverName": null, "methodName": "_encode" }
+        ],
+        "regexes": [
+        ]
+      },
+      "SqlInjection": {
+        "functions": [
+          "esc_sql",
+          "like_escape",
+          "sanitize_sql_orderby"
+        ],
+        "methods": [
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "prepare", "excludeArgs": [1] },
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "esc_like" },
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "escape" },
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "escape_by_ref" },
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "strip_invalid_text" },
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "strip_invalid_text_for_column" },
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "strip_invalid_text_from_query" },
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "_real_escape" },
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "_escape" },
+          { "typeName": "wpdb", "receiverName": "$wpdb", "methodName": "_weak_escape" }
+        ],
+        "regexes": []
+      },
+      "FileInclusion": {
+        "functions": [
+          "sanitize_file_name"
+        ],
+        "methods": [],
+        "regexes": []
+      },
+      "FileManipulation": {
+        "functions": [
+          "sanitize_file_name"
+        ],
+        "methods": [],
+        "regexes": []
+      },
+      "Ssrf": {
+        "functions": [
+          "sanitize_file_name",
+          "wp_safe_remote_get",
+          "wp_safe_remote_post",
+          "wp_safe_remote_request",
+          "wp_safe_remote_head"
+        ],
+        "methods": [],
+        "regexes": []
+      }
+    }
+  }
+}

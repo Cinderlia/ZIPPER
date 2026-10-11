@@ -1,0 +1,1289 @@
+{
+  "PHP": {
+    "Xss": {
+      "functions": [
+        {
+          "name": "echo"
+        },
+        {
+          "name": "print",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "print_r",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "exit",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "die",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "printf"
+        },
+        {
+          "name": "vprintf"
+        },
+        {
+          "name": "trigger_error",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "user_error",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "odbc_result_all",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "ovrimos_result_all",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "ifx_htmltbl_result",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "var_dump",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "var_export",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "highlight_string",
+          "args": [
+            1
+          ]
+        }
+      ],
+      "methods": []
+    },
+    "CmdInjection": {
+      "functions": [
+        {
+          "name": "backticks",
+          "args": [1]
+        },
+        {
+          "name": "exec",
+          "args": [1]
+        },
+        {
+          "name": "expect_popen",
+          "args": [1]
+        },
+        {
+          "name": "passthru",
+          "args": [1]
+        },
+        {
+          "name": "pcntl_exec",
+          "args": [1]
+        },
+        {
+          "name": "popen",
+          "args": [1]
+        },
+        {
+          "name": "proc_open",
+          "args": [1]
+        },
+        {
+          "name": "shell_exec",
+          "args": [1]
+        },
+        {
+          "name": "system",
+          "args": [1]
+        },
+        {
+          "name": "mail",
+          "args": [5]
+        },
+        {
+          "name": "mb_send_mail",
+          "args": [5]
+        },
+        {
+          "name": "w32api_invoke_function",
+          "args": [1]
+        },
+        {
+          "name": "w32api_register_function",
+          "args": [2]
+        }
+      ],
+      "methods": []
+    },
+    "CodeInjection": {
+      "functions": [
+        {
+          "name": "fputs",
+          "args": [2]
+        },
+        {
+          "name": "file_put_contents",
+          "args": [2]
+        },
+        {
+          "name": "assert",
+          "args": [1]
+        },
+        {
+          "name": "create_function",
+          "args": [1, 2]
+        },
+        {
+          "name": "eval",
+          "args": [1]
+        },
+        {
+          "name": "mb_ereg_replace",
+          "args": [2]
+        },
+        {
+          "name": "mb_eregi_replace",
+          "args": [2]
+        },
+        {
+          "name": "preg_filter",
+          "args": [2]
+        },
+        {
+          "name": "preg_replace",
+          "args": [2]
+        }
+      ],
+      "methods": []
+    },
+    "SqlInjection": {
+      "functions": [
+        {
+          "name": "dba_open",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "dba_popen",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "dba_insert",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "dba_fetch",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "dba_delete",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "dbx_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "odbc_do",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "odbc_exec",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "odbc_execute",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "db2_exec",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "db2_execute",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "fbsql_db_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "fbsql_query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "ibase_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "ibase_execute",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "ifx_query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "ifx_do",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "ingres_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "ingres_execute",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "ingres_unbuffered_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "msql_db_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "msql_query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "msql",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "mssql_query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "mssql_execute",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "mysql_db_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "mysql_query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "mysql_unbuffered_query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "mysqli_stmt_execute",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "mysqli_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "mysqli_real_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "mysqli_master_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "mysqli_multi_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "oci_execute",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "ociexecute",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "ovrimos_exec",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "ovrimos_execute",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "ora_do",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "ora_exec",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "pg_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "pg_send_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "pg_send_query_params",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "pg_send_prepare",
+          "args": [
+            3
+          ]
+        },
+        {
+          "name": "pg_prepare",
+          "args": [
+            3
+          ]
+        },
+        {
+          "name": "sqlite_open",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "sqlite_popen",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "sqlite_array_query",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "arrayQuery",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "singleQuery",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "sqlite_query",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "sqlite_exec",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "sqlite_single_query",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "sqlite_unbuffered_query",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "sybase_query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "sybase_unbuffered_query",
+          "args": [
+            1
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "typeName": "PDO",
+          "methodName": "query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "PDO",
+          "methodName": "exec",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "mysqli",
+          "methodName": "query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "mysqli",
+          "methodName": "real_query",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "mysqli",
+          "methodName": "multi_query",
+          "args": [
+            1
+          ]
+        }
+      ]
+    },
+    "FileInclusion": {
+      "functions": [
+        {
+          "name": "include",
+          "args": [1]
+        },
+        {
+          "name": "include_once",
+          "args": [1]
+        },
+        {
+          "name": "require",
+          "args": [1]
+        },
+        {
+          "name": "require_once",
+          "args": [1]
+        }
+      ],
+      "methods": []
+    },
+    "FileManipulation": {
+      "functions": [
+        {
+          "name": "fputs",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "file_put_contents",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "fopen",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "file_get_contents",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "readfile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "copy",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "rename",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "move_uploaded_file",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "chdir",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "chmod",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "chown",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "chgrp",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "mkdir",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "rmdir",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "symlink",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "link",
+          "args": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "touch",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "gzfile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "gzopen",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "readgzfile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "finfo_file",
+          "args": [
+            2
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "typeName": "finfo",
+          "methodName": "file",
+          "args": [
+            1
+          ]
+        }
+      ]
+    },
+    "ObjectInjection": {
+      "functions": [
+        {
+          "name": "unserialize",
+          "args": [
+            1
+          ]
+        }
+      ],
+      "methods": [
+      ]
+    },
+    "Ssrf": {
+      "functions": [
+        {
+          "name": "file_get_contents",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "readfile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "filesize",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "copy",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "touch",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "gzfile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "gzopen",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "readgzfile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "mime_content_type",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "fsockopen",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "pfsockopen",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "curl_init",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "get_headers",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "fopen",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "simplexml_load_file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "exif_read_data",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "exif_imagetype",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "getimagesize",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefrombmp",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefromgd",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefromgd2",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefromgd2part",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefromgif",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefromjpeg",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefrompng",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefromwbmp",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefromwebp",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefromxbm",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imagecreatefromxpm",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "imageloadfont",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "get_meta_tags",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "php_strip_whitespace",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "highlight_file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "error_log",
+          "args": [
+            3
+          ]
+        },
+        {
+          "name": "scandir",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "is_readable",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "filemtime",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "filetype",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "filegroup",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "fileowner",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "is_link",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "parse_ini_file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "is_executable",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "file_put_contents",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "file_exists",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "fileatime",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "is_dir",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "is_file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "is_writable",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "is_writeable",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "filectime",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "fileinode",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "fileperms",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "lstat",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "stat",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "mkdir",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "rmdir",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "lchgrp",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "chgrp",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "lchown",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "chmod",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "chown",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "rename",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "stream_socket_client",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "mysqli_connect",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "pg_connect",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "md5_file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "sha1_file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "hash_file",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "hash_update_file",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "tidy_parse_file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "tidy_repair_file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "finfo_file",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "socket_connect",
+          "args": [
+            2
+          ]
+        },
+        {
+          "name": "ftp_connect",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "include",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "include_once",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "require",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "require_once",
+          "args": [
+            1
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "typeName": "DOMDocument",
+          "methodName": "load",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "DOMDocument",
+          "methodName": "loadHTMLFile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "XMLReader",
+          "methodName": "open",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "tidy",
+          "methodName": "parseFile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "tidy",
+          "methodName": "repairFile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "finfo",
+          "methodName": "file",
+          "args": [
+            1
+          ]
+        },
+        {
+          "typeName": "SoapClient",
+          "methodName": "__construct",
+          "args": [
+            2
+          ]
+        },
+        {
+          "typeName": "PDO",
+          "methodName": "__construct",
+          "args": [
+            1
+          ]
+        }
+      ]
+    }
+  }
+}

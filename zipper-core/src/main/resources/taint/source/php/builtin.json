@@ -1,0 +1,35 @@
+{
+  "PHP": {
+    "globals": [
+      {
+        "name": "_REQUEST"
+      },
+      {
+        "name": "_POST"
+      },
+      {
+        "name": "_GET"
+      },
+      {
+        "name": "HTTP_GET_VARS"
+      },
+      {
+        "name": "HTTP_POST_VARS"
+      },
+      {
+        "name": "HTTP_SERVER_VARS",
+        "allowKeys": [
+          "HTTP_REFERER", "QUERY_STRING", "PHP_SELF", "argv"
+        ]
+      },
+      {
+        "name": "_SERVER",
+        "allowKeys": [
+          "HTTP_REFERER", "QUERY_STRING", "PHP_SELF", "argv"
+        ]
+      }
+    ],
+    "functions": [],
+    "methods": []
+  }
+}

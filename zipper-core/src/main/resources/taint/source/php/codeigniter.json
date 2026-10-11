@@ -1,0 +1,24 @@
+{
+  "PHP": {
+    "globals": [],
+    "functions": [],
+    "methods": [
+      {
+        "receiverName": "$this->input",
+        "methodName": "get"
+      },
+      {
+        "receiverName": "$this->input",
+        "methodName": "post"
+      },
+      {
+        "receiverName": "$this->input",
+        "methodName": "cookie"
+      },
+      {
+        "receiverName": "$this->input",
+        "methodName": "server"
+      }
+    ]
+  }
+}

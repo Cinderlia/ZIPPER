@@ -1,0 +1,16 @@
+{
+  "PYTHONSRC": {
+    "globals": [
+      {
+        "name": "_REQUEST"
+      }
+    ],
+    "functions": [],
+    "methods": [
+      {
+        "receiverName": "flask\\.request\\..+?",
+        "methodName": "get"
+      }
+    ]
+  }
+}
