@@ -38,7 +38,7 @@ case class ToInt(str: StringTerm) extends IntTerm, HasOperands {
 object ToInt {
   def create(str: StringTerm): IntTerm = {
     str match {
-      case StringLiteral(value) => IntLiteral(value.toInt)
+      case StringLiteral(value) => value.toIntOption.map(IntLiteral(_)).getOrElse(ToInt(str))
       case _                    => StringLength(str)
     }
   }
