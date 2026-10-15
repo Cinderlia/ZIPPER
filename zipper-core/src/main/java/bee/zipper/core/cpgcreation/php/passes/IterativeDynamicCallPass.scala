@@ -466,7 +466,7 @@ class IterativeDynamicCallPass(
         // currently not supported by joern
         None
       case x =>
-        if (cpg.typeDecl(prefix).nonEmpty) Some(prefix)
+        if (cpg.typeDecl(RegexEscaper.escape(prefix)).nonEmpty) Some(prefix)
         else None
     }
   }
