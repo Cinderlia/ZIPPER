@@ -1,3 +1,25 @@
+About This Repository
+The ZIPPER source code in this repository originates from the academic paper "ZIPPER: Static Taint Analysis for PHP Applications with Precision and Efficiency", published at USENIX Security 2025.
+
+Paper Information:
+
+Title: ZIPPER: Static Taint Analysis for PHP Applications with Precision and Efficiency
+
+Authors: Xinyi Wang, Yeting Li, Jie Lu, Shizhe Cui, Chenghang Shi, Qin Mai, Yunpei Zhang, Yang Xiao, Feng Li, Wei Huo
+
+Venue: 34th USENIX Security Symposium (USENIX Security '25), Seattle, WA, August 2025
+
+Official Paper Link: https://www.usenix.org/conference/usenixsecurity25/presentation/wang-xinyi
+
+Original Artifact URLs:
+
+Zenodo record: https://zenodo.org/records/15582111 (v1, 2025-06-05)
+
+Zenodo updated version: https://zenodo.org/records/15636541 (v2, 2025-06-11)
+
+Note: This repository was created by an individual researcher who downloaded the artifact from the Zenodo records above and re-uploaded it to GitHub for personal academic research purposes. The code may be modified or extended in the future. If you wish to cite the ZIPPER tool or paper, please refer to the official paper and artifact information listed above.
+
+
 # ZIPPER
 
 ZIPPER is a taint-analysis tool for PHP applications, built on top of Joern's `php2cpg` component.
