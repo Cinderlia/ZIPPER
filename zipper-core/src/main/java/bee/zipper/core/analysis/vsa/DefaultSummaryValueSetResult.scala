@@ -96,27 +96,32 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
         _ => {
           translate(v) match {
             case jv: Var =>
-              val name           = jv.toString
-              val m              = v.method
-              val bbCfg          = DefaultBBCfg.create(m, unrolling = true)
-              val isInInitMethod = isInitMethod(m)
-              val env =
-                Env(
-                  m,
-                  bbCfg,
-                  FunSummary.create(m),
-                  bbCfg.bbOf(node),
-                  partialEval,
-                  isInInitMethod,
-                  Set.empty,
-                  pathCallGraph
-                )
-              val (pts, sideEffects) = evalVariable(env, name)
-              // transform `dummy object` to `.*` pattern if it's in partial evaluation mode
-              if (partialEval && pts.size == 1 && pts.head.is[DummyObject])
-                Set(ValueSetResult.dotPatternSym)
-              else
-                pts
+              val name = jv.toString
+              val m    = v.method
+              if (m.cfgFirst.isEmpty) {
+                logger.warn(s"`ptsOf` skips method without CFG entry ${location(node, v)}")
+                if (partialEval) Set(ValueSetResult.dotPatternSym) else Set.empty
+              } else {
+                val bbCfg          = DefaultBBCfg.create(m, unrolling = true)
+                val isInInitMethod = isInitMethod(m)
+                val env =
+                  Env(
+                    m,
+                    bbCfg,
+                    FunSummary.create(m),
+                    bbCfg.bbOf(node),
+                    partialEval,
+                    isInInitMethod,
+                    Set.empty,
+                    pathCallGraph
+                  )
+                val (pts, sideEffects) = evalVariable(env, name)
+                // transform `dummy object` to `.*` pattern if it is in partial evaluation mode
+                if (partialEval && pts.size == 1 && pts.head.is[DummyObject])
+                  Set(ValueSetResult.dotPatternSym)
+                else
+                  pts
+              }
             case x @ _ =>
               logger.warn(s"unimplemented for ${x.getClass.getName}")
               Set.empty
@@ -522,10 +527,9 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
     def enterCaller(callsite: Call, parameterIndex: Integer): Result = {
       val caller = callsite.method
       logger.info(s"`ptsOf` enter caller `${caller.name} @ ${caller.filename}` for variable `$name`")
-      val bbCfg = DefaultBBCfg.create(caller, unrolling = true)
-      // find the corresponding argument in callsite
-      callsite.args.lift(parameterIndex) match {
-        case Some(arg) =>
+      (callsite.args.lift(parameterIndex), caller.cfgFirst.headOption) match {
+        case (Some(arg), Some(_)) =>
+          val bbCfg = DefaultBBCfg.create(caller, unrolling = true)
           val _env = Env(
             caller,
             bbCfg,
@@ -537,7 +541,7 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
             env.pathCallGraph
           )
           evalVariable(_env, translate(arg).toString)
-        case None => (Set.empty, List.empty)
+        case _ => (Set.empty, List.empty)
       }
     }
 
