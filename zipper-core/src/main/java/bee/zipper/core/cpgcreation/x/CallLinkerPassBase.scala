@@ -66,7 +66,7 @@ trait CallLinkerPassBase {
   }
 
   protected def getSubTypeDecls(typeDeclName: String): List[TypeDecl] = {
-    cpg.typeDecl(typeDeclName).flatMap(getSubTypeDecls).toList
+    cpg.typeDecl(RegexEscaper.escape(typeDeclName)).flatMap(getSubTypeDecls).toList
   }
 
   protected def typeDeclFilter(typeDecls: List[TypeDecl], calls: List[Call]): List[TypeDecl] = {
@@ -137,18 +137,30 @@ trait CallLinkerPassBase {
   }
 
   protected def findMethod(typeNamePattern: String, namePattern: String): Iterator[Method] = {
+    val pendingTypeNames = mutable.ArrayBuffer(typeNamePattern)
+    val visitedTypeDecls = mutable.Set.empty[Long]
+    val matchedMethods   = mutable.ListBuffer.empty[Method]
+
     try {
-      val typeDecls = cpg.typeDecl(RegexEscaper.escape(typeNamePattern)).toList
-      val methods   = typeDecls.flatMap(decl => decl.method.filter(m => ("(?i)" + namePattern).r.matches(m.name)))
-      // when a method cannot be found, search for it in the parent class.
-      if (methods.isEmpty && typeDecls.exists(_._inheritsFromOut.nonEmpty)) {
-        typeDecls.flatMap { decl =>
-          decl._inheritsFromOut.flatMap { case typ: Type =>
-            findMethod(typ.name, namePattern)
+      while (pendingTypeNames.nonEmpty) {
+        val currentTypeName = pendingTypeNames.remove(pendingTypeNames.size - 1)
+        val typeDecls = cpg
+          .typeDecl(RegexEscaper.escape(currentTypeName))
+          .toList
+          .filter(decl => visitedTypeDecls.add(decl.id()))
+        val methods = typeDecls.flatMap(decl => decl.method.filter(m => ("(?i)" + namePattern).r.matches(m.name)))
+
+        if (methods.nonEmpty) matchedMethods ++= methods
+        else {
+          typeDecls.reverseIterator.foreach { decl =>
+            decl._inheritsFromOut.toList.reverseIterator.foreach {
+              case typ: Type => pendingTypeNames += typ.name
+              case _         =>
+            }
           }
         }
-      } else
-        methods
+      }
+      matchedMethods.iterator
     } catch {
       case e: Exception =>
         logger.warn(s"pattern <$typeNamePattern> syntax exception")
