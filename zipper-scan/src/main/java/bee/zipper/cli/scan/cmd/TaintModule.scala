@@ -32,6 +32,8 @@ class TaintModule extends AppModule {
 
   override def run(): Unit = {
     val outputDir = basicConfig.outputDir
+    val reachabilityReport = ReachabilityReportMode.parse(basicConfig.engineConfig.enableReachabilityReport)
+      .map(new ReachabilityReportCollector(_))
     FileSys.ensureDirectoryExists(outputDir)
     // Load custom configurations if provided
     loadCustomConfigurations()
@@ -46,8 +48,9 @@ class TaintModule extends AppModule {
           CpgGeneration.applyPHPPasses(cpg, api, basicConfig.engineConfig)
         }
         // Traditional taint analysis mode
-        val taintAnalysisResult = executeStaticTaintAnalysis(basicConfig.engineConfig, cpg, api)
-        generateReport(taintAnalysisResult, outputDir, true)
+        val taintAnalysisResult =
+          executeStaticTaintAnalysis(basicConfig.engineConfig, cpg, api, reachabilityReport)
+        generateReport(taintAnalysisResult, outputDir, true, reachabilityReport)
         // save cpg to file
         try cpg.close()
         catch { case ex: Exception => logger.warn("Error while closing CPG", ex) }
@@ -122,7 +125,12 @@ object TaintCmd {
 
   /** Run STATIC taint analysis
     */
-  def executeStaticTaintAnalysis(c: EngineConfig, cpg: Cpg, api: Api): TaintAnalysisResult = {
+  def executeStaticTaintAnalysis(
+    c: EngineConfig,
+    cpg: Cpg,
+    api: Api,
+    reachabilityReport: Option[ReachabilityReportCollector] = None
+  ): TaintAnalysisResult = {
     val aliasFinder =
       if (c.enableOnDemandAliasAnalysis && !c.enableObjectDataDependency)
         Some(DefaultAliasAnalysis(api.vsa, api.icfg()))
@@ -137,19 +145,31 @@ object TaintCmd {
           api.vfg,
           api.vsa,
           exploitMode = false,
-          enableReachAnalysis = c.enableReachabilityAnalysis,
+          enableReachAnalysis = false,
           enableDeduplicateFlow = c.enableDeduplicateFlow,
           enableCustomSanitizer = c.enableCustomSanitizer,
           enableKeywordMatching = c.enableSanitizerKeywordMatching,
           enableIndirectSuperGlobalFetching = c.enableIndirectSuperGlobalFetching,
           aliasFinder = aliasFinder
         )
-    taintAnalysis.analyze()
+    val result = taintAnalysis.analyze()
+    if (c.enableReachabilityAnalysis || reachabilityReport.nonEmpty) {
+      val reachability = new ReachabilityAnalysis(api.vsa, reachabilityReport)
+      result.copy(paths = result.paths.filter { path =>
+        val reachable = reachability.isReachable(path.path, Some(path.kind))
+        !c.enableReachabilityAnalysis || reachable
+      })
+    } else result
   }
 
   /** Generates JSON and SARIF reports based on static taint analysis result
     */
-  def generateReport(taintAnalysisResult: TaintAnalysisResult, outputDir: String, sarif: Boolean): Unit = {
+  def generateReport(
+    taintAnalysisResult: TaintAnalysisResult,
+    outputDir: String,
+    sarif: Boolean,
+    reachabilityReport: Option[ReachabilityReportCollector] = None
+  ): Unit = {
     val jsonFile   = Paths.get(outputDir, "taint-analysis-result.json").toFile
     val jsonStream = new PrintStream(new FileOutputStream(jsonFile))
     import scala.jdk.CollectionConverters.*
@@ -161,6 +181,8 @@ object TaintCmd {
           println(s"$vulnCount ${path.head.code}")
         )
         .toList
+
+    reachabilityReport.foreach(_.writeReports(outputDir))
 
     val pathCluster      = new TaintPathCluster(taintPaths)
     val newDataflowEdges = taintAnalysisResult.newDataflowEdges.asScala.map(x => (x._1.code, x._2.code)).toSet

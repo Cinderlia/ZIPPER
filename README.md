@@ -74,6 +74,8 @@ java -jar zipper-scan/target/zipper-scan-jar-with-dependencies.jar taint \
 ```
 If your codebase uses custom recursive XSS sanitization functions, you can activate an extra recognizer: `--enable-custom-sanitizer-recognizer`.
 
+Reachability reports can be generated with `--enable-reachability-report=path` or `--enable-reachability-report=debug`. Both options write `output/reachability-path-report.json`; `debug` also writes `output/reachability-debug-report.json`. Report generation runs reachability checks but does not filter paths unless `--enable-reachability-analysis` is also enabled.
+
 
 
 # Docker Image

@@ -136,6 +136,16 @@ class EngineConfig {
   var enableReachabilityAnalysis: Boolean = false
 
   @CommandLine.Option(
+    names = Array("--enable-reachability-report"),
+    paramLabel = "<path|debug>",
+    description = Array(
+      "Generate reachability JSON reports; filtering remains controlled by --enable-reachability-analysis"
+    ),
+    arity = "1"
+  )
+  var enableReachabilityReport: String = ""
+
+  @CommandLine.Option(
     names = Array("--enable-custom-sanitizer-recognizer"),
     description = Array("Enable custom sanitizer recognizer for recursive sanitizers")
   )
