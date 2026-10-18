@@ -33,8 +33,27 @@ object SarifGenerator {
 
   def forTaintPath(taintPath: TaintPath): Result = {
     def buildCodeFlow(): CodeFlow = {
-      val threadFlowLocations =
-        taintPath.path.flatMap(forCfgNode).map(location => ThreadFlowLocation().withLocation(location))
+      val threadFlowLocations = taintPath.path.zipWithIndex.flatMap { case (node, pathIndex) =>
+        forCfgNode(node).map { location =>
+          val controls = taintPath.controlDependencies
+            .filter(_.pathIndex == pathIndex)
+            .map { dependency =>
+              val properties = new PropertyBag()
+              properties.put("controlType", dependency.controlType)
+              properties.put("file", dependency.file)
+              properties.put("line", dependency.line)
+              properties.put("conditionCode", dependency.conditionCode)
+              properties.put("code", dependency.code)
+              properties
+            }
+          val threadFlowLocation = ThreadFlowLocation().withLocation(location)
+          if (controls.nonEmpty) {
+            val properties = new PropertyBag()
+            properties.put("controlDependencies", controls.asJava)
+            threadFlowLocation.withProperties(properties)
+          } else threadFlowLocation
+        }
+      }
       val threadFlow = ThreadFlow().withLocations(threadFlowLocations.asJava)
       val codeFlow   = new CodeFlow()
       codeFlow.setThreadFlows(List(threadFlow).asJava)

@@ -32,12 +32,15 @@ class PHPJoernTaintAnalysis(cpg: Cpg, sources: List[CfgNode], kindToSinks: Map[S
       EngineContext(semantic, EngineConfig(maxArgsToAllow = 3000, strict = false, exploitMode = false))
     }
 
+    val controlDependencyExtractor = new ControlDependencyExtractor(cpg)
     val paths = kindToSinks.iterator.flatMap { case (kind, taintSinks) =>
       val (sinks, argumentToCall) = extractSinks(taintSinks)
       sinks
         .reachableByFlows(sources)
         .map(path => refactorPath(path, argumentToCall))
-        .map(path => TaintPath(kind, true, extractCfgNodes(path)))
+        .map(path =>
+          TaintPath.withControlDependencies(kind, true, extractCfgNodes(path), controlDependencyExtractor)
+        )
     }
     TaintAnalysisResult(paths)
   }

@@ -78,6 +78,10 @@ Reachability reports can be generated with `--enable-reachability-report=path` o
 
 Use `--enable-ControlStructure` to add CFG-reachable control structures that contain taint-path nodes or whose conditions depend on taint-path values. The option is disabled by default.
 
+Control dependencies are collected from each original taint-path node's CPG `controlledBy` relations. The regular JSON report serializes these dependencies under each path element's `controlDependencies` field. SARIF CodeFlow thread locations expose the same metadata in their `properties.controlDependencies` field.
+
+For raw Joern paths with control dependencies, use `--emit-control-flow-paths`. It writes one JSON object per line to `<output-dir>/control-flow-paths.jsonl` and bypasses ZIPPER's sink-call path normalization, deduplication, path validation, reachability filtering, clustering, and regular report generation.
+
 
 
 # Docker Image

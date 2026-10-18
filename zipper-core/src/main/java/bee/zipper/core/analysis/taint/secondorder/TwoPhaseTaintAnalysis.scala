@@ -119,6 +119,16 @@ class TwoPhaseTaintAnalysis(
     for {
       firstPath  <- firstPaths
       secondPath <- secondPaths
-    } yield TaintPath(secondPath.kind, firstPath.order, firstPath.path ++ secondPath.path)
+    } yield {
+      val secondPathControls = secondPath.controlDependencies.map(dependency =>
+        dependency.copy(pathIndex = dependency.pathIndex + firstPath.path.size)
+      )
+      TaintPath(
+        secondPath.kind,
+        firstPath.order,
+        firstPath.path ++ secondPath.path,
+        firstPath.controlDependencies ++ secondPathControls
+      )
+    }
   }
 }

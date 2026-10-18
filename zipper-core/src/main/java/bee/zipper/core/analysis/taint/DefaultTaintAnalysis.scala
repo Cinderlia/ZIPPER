@@ -29,14 +29,18 @@ class DefaultTaintAnalysis(
   enableCustomSanitizer: Boolean = false,
   enableKeywordMatching: Boolean = false,
   aliasFinder: Option[AliasFinder] = None,
-  enableControlStructure: Boolean = false
+  enableControlStructure: Boolean = false,
+  emitControlFlowPaths: Boolean = false,
+  rawPathEmitter: Option[TaintPath => Unit] = None
 ) extends TaintAnalysis {
   private val language   = cpg.metaData.language.head
   private val pathFilter = new PathFilter(cpg, vsa, language, exploitMode, enableCustomSanitizer, enableKeywordMatching)
   private val controlStructurePathEnhancer = new ControlStructurePathEnhancer
   private val taintSourceNodes = sources.toSet
+  private val controlDependencyExtractor = new ControlDependencyExtractor(cpg)
 
   override def analyze(): TaintAnalysisResult = {
+    require(!emitControlFlowPaths || rawPathEmitter.nonEmpty, "Raw control-flow path output requires an emitter")
     implicit val context: EngineContext = {
       val semantic = SemanticsGenerator.taintSemantic(language, exploitMode)
       semantic.initialize(cpg)
@@ -44,6 +48,17 @@ class DefaultTaintAnalysis(
         semantic,
         EngineConfig(maxArgsToAllow = 3000, strict = strict, exploitMode = exploitMode, aliasFinder = aliasFinder)
       )
+    }
+
+    if (emitControlFlowPaths) {
+      kindToSinks.foreach { case (kind, taintSinks) =>
+        val (sinks, _) = extractSinks(taintSinks)
+        sinks.reachableByFlows(sources).foreach { flow =>
+          val path = TaintPath.withControlDependencies(kind, true, extractCfgNodes(flow), controlDependencyExtractor)
+          rawPathEmitter.foreach(_(path))
+        }
+      }
+      return TaintAnalysisResult(Iterator.empty, context.newDataflowEdges)
     }
 
     // iterate over each vulnerability kind and its associated sinks to compute taint paths.
@@ -57,12 +72,20 @@ class DefaultTaintAnalysis(
       // step2. remove duplicate flows if exploit mode is disabled
       val deduplicated = if (!exploitMode && enableDeduplicateFlow) DuplicateFlowProcessor.deduplicate(flows) else flows
       // step3. transform joern `Path` into `TaintPath`
-      val taintPaths = deduplicated
-        .map(path => TaintPath(kind, true, extractCfgNodes(path)))
-        .map(path =>
-          if (enableControlStructure) controlStructurePathEnhancer.enhance(path, taintSourceNodes)
-          else path
+      val taintPaths = deduplicated.map { path =>
+        val originalPath = extractCfgNodes(path)
+        val basePath = TaintPath(kind, true, originalPath)
+        val enhancedPath =
+          if (enableControlStructure) controlStructurePathEnhancer.enhance(basePath, taintSourceNodes)
+          else basePath
+        TaintPath.withControlDependencies(
+          kind,
+          true,
+          enhancedPath.path,
+          controlDependencyExtractor,
+          originalPath.toSet
         )
+      }
       // step4. filter out invalid paths
       val validatedPaths = taintPaths.filter(path => pathFilter.isValid(path))
       // step5. filter paths based on lightweight path-reachability
@@ -114,7 +137,9 @@ object DefaultTaintAnalysis {
     enableKeywordMatching: Boolean = false,
     enableIndirectSuperGlobalFetching: Boolean = true,
     aliasFinder: Option[AliasFinder] = None,
-    enableControlStructure: Boolean = false
+    enableControlStructure: Boolean = false,
+    emitControlFlowPaths: Boolean = false,
+    rawPathEmitter: Option[TaintPath => Unit] = None
   ): DefaultTaintAnalysis = {
     val sources = {
       val searcher =
@@ -137,7 +162,9 @@ object DefaultTaintAnalysis {
       enableCustomSanitizer,
       enableKeywordMatching,
       aliasFinder,
-      enableControlStructure
+      enableControlStructure,
+      emitControlFlowPaths,
+      rawPathEmitter
     )
   }
 }

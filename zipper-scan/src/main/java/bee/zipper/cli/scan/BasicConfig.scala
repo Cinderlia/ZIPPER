@@ -136,6 +136,14 @@ class EngineConfig {
   var enableReachabilityAnalysis: Boolean = false
 
   @CommandLine.Option(
+    names = Array("--emit-control-flow-paths"),
+    description = Array(
+      "Emit raw Joern taint paths with direct control dependencies to <output-dir>/control-flow-paths.jsonl and skip ZIPPER post-processing"
+    )
+  )
+  var emitControlFlowPaths: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--enable-reachability-report"),
     paramLabel = "<path|debug>",
     description = Array(

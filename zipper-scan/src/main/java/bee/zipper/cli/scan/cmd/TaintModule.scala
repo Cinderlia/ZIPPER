@@ -19,6 +19,7 @@ import picocli.CommandLine
 import picocli.CommandLine.{Command, Mixin}
 
 import java.io.{File, FileOutputStream, PrintStream}
+import java.nio.charset.StandardCharsets
 import java.nio.file.Paths
 
 @Command(description = Array("Static taint analysis for PHP"))
@@ -47,13 +48,33 @@ class TaintModule extends AppModule {
         if (!basicConfig.projectConfig.isLoadingCpgMode) {
           CpgGeneration.applyPHPPasses(cpg, api, basicConfig.engineConfig)
         }
-        // Traditional taint analysis mode
-        val taintAnalysisResult =
-          executeStaticTaintAnalysis(basicConfig.engineConfig, cpg, api, reachabilityReport)
-        generateReport(taintAnalysisResult, outputDir, true, reachabilityReport)
-        // save cpg to file
-        try cpg.close()
-        catch { case ex: Exception => logger.warn("Error while closing CPG", ex) }
+        var rawPathOutput: Option[PrintStream] = None
+        try {
+          rawPathOutput =
+            if (basicConfig.engineConfig.emitControlFlowPaths)
+              Some(
+                new PrintStream(
+                  new FileOutputStream(Paths.get(outputDir, "control-flow-paths.jsonl").toFile),
+                  true,
+                  StandardCharsets.UTF_8
+                )
+              )
+            else None
+          val rawPathEmitter = rawPathOutput.map(stream => (path: TaintPath) => stream.println(renderControlFlowPath(path)))
+          val taintAnalysisResult = executeStaticTaintAnalysis(
+            basicConfig.engineConfig,
+            cpg,
+            api,
+            reachabilityReport,
+            rawPathEmitter
+          )
+          if (!basicConfig.engineConfig.emitControlFlowPaths)
+            generateReport(taintAnalysisResult, outputDir, true, reachabilityReport)
+        } finally {
+          rawPathOutput.foreach(_.close())
+          try cpg.close()
+          catch { case ex: Exception => logger.warn("Error while closing CPG", ex) }
+        }
       case None => logger.warn("CPG generation or loading failed")
     }
   }
@@ -129,7 +150,8 @@ object TaintCmd {
     c: EngineConfig,
     cpg: Cpg,
     api: Api,
-    reachabilityReport: Option[ReachabilityReportCollector] = None
+    reachabilityReport: Option[ReachabilityReportCollector] = None,
+    rawPathEmitter: Option[TaintPath => Unit] = None
   ): TaintAnalysisResult = {
     val aliasFinder =
       if (c.enableOnDemandAliasAnalysis && !c.enableObjectDataDependency)
@@ -137,7 +159,22 @@ object TaintCmd {
       else
         None
     val taintAnalysis =
-      if (c.enablePHPJoernTaintAnalysis)
+      if (c.emitControlFlowPaths)
+        DefaultTaintAnalysis(
+          cpg,
+          api.vfg,
+          api.vsa,
+          exploitMode = false,
+          enableReachAnalysis = false,
+          enableDeduplicateFlow = c.enableDeduplicateFlow,
+          enableCustomSanitizer = c.enableCustomSanitizer,
+          enableKeywordMatching = c.enableSanitizerKeywordMatching,
+          enableIndirectSuperGlobalFetching = c.enableIndirectSuperGlobalFetching,
+          aliasFinder = aliasFinder,
+          emitControlFlowPaths = true,
+          rawPathEmitter = rawPathEmitter
+        )
+      else if (c.enablePHPJoernTaintAnalysis)
         PHPJoernTaintAnalysis(cpg, api.vfg, api.vsa)
       else
         DefaultTaintAnalysis(
@@ -154,7 +191,8 @@ object TaintCmd {
           enableControlStructure = c.enableControlStructure
         )
     val result = taintAnalysis.analyze()
-    if (c.enableReachabilityAnalysis || reachabilityReport.nonEmpty) {
+    if (c.emitControlFlowPaths) result
+    else if (c.enableReachabilityAnalysis || reachabilityReport.nonEmpty) {
       val reachability = new ReachabilityAnalysis(api.vsa, reachabilityReport)
       result.copy(paths = result.paths.filter { path =>
         val reachable = reachability.isReachable(path.path, Some(path.kind))
@@ -205,9 +243,13 @@ object TaintCmd {
 /** Data model and utilities for representing and serializing the results of taint analysis
   */
 object TaintResult {
-  case class PathElement(file: String, line: Int, code: String) {
+  case class PathControl(controlType: String, file: String, line: Int, conditionCode: String, code: String)
+
+  case class PathElement(file: String, line: Int, code: String, controlDependencies: Seq[PathControl]) {
     override def toString: String = s"$file:$line $code"
   }
+
+  case class ControlFlowPath(kind: String, path: Seq[PathElement])
 
   case class Vulnerability(
     id: Int,
@@ -230,20 +272,61 @@ object TaintResult {
 
   case class AnalysisSummary(clusterSize: Int, allVulns: Int, clusters: Seq[Cluster])
 
+  implicit val pathControlEncoder: Encoder[PathControl]     = deriveEncoder
   implicit val pathElementEncoder: Encoder[PathElement]     = deriveEncoder
+  implicit val controlFlowPathEncoder: Encoder[ControlFlowPath] = deriveEncoder
   implicit val vulnerabilityEncoder: Encoder[Vulnerability] = deriveEncoder
   implicit val clusterEncoder: Encoder[Cluster]             = deriveEncoder
   implicit val summaryEncoder: Encoder[AnalysisSummary]     = deriveEncoder
+
+  def renderControlFlowPath(path: TaintPath): String = {
+    val controlsByPathIndex = path.controlDependencies
+      .groupBy(_.pathIndex)
+      .view
+      .mapValues(_.map(dependency =>
+        PathControl(
+          dependency.controlType,
+          dependency.file,
+          dependency.line,
+          dependency.conditionCode,
+          dependency.code
+        )
+      ))
+      .toMap
+    val elements = path.path.zipWithIndex.map { case (node, pathIndex) =>
+      PathElement(
+        node.file.headOption.map(_.name.replace(File.separator, "/")).getOrElse(""),
+        node.lineNumber.getOrElse(-1),
+        node.code,
+        controlsByPathIndex.getOrElse(pathIndex, Seq.empty)
+      )
+    }
+    Printer.noSpaces.print(ControlFlowPath(path.kind, elements).asJson)
+  }
 
   def constructCluster(paths: List[TaintPath], newEdges: Set[(String, String)]): Cluster = {
     import org.apache.commons.codec.digest.DigestUtils
 
     def buildVulnerability(id: Int, path: TaintPath): Vulnerability = {
-      val elements = path.path.map { node =>
+      val controlsByPathIndex = path.controlDependencies
+        .groupBy(_.pathIndex)
+        .view
+        .mapValues(_.map(dependency =>
+          PathControl(
+            dependency.controlType,
+            dependency.file,
+            dependency.line,
+            dependency.conditionCode,
+            dependency.code
+          )
+        ))
+        .toMap
+      val elements = path.path.zipWithIndex.map { case (node, pathIndex) =>
         PathElement(
           file = node.file.headOption.map(_.name.replace(File.separator, "/")).getOrElse(""),
           line = node.lineNumber.getOrElse(-1),
-          code = node.code
+          code = node.code,
+          controlDependencies = controlsByPathIndex.getOrElse(pathIndex, Seq.empty)
         )
       }
       val features = TaintPathAnalyzer.extractFeatures(path, newEdges)
