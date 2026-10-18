@@ -1,0 +1,159 @@
+package bee.zipper.core.analysis.taint
+
+import bee.zipper.core.ir.CpgNodeExtension.*
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.codepropertygraph.generated.EdgeTypes
+import io.shiftleft.semanticcpg.language.*
+
+import scala.collection.mutable
+
+/** Adds control structures that affect a taint path or depend on its tainted values. */
+final class ControlStructurePathEnhancer {
+  def enhance(path: TaintPath, taintSources: Set[CfgNode]): TaintPath = {
+    if (path.path.size < 2) return path
+
+    val taintNodes    = path.path.toSet
+    val insertions    = mutable.Map.empty[Int, mutable.LinkedHashSet[CfgNode]]
+    val insertedNodes = mutable.Set.empty[CfgNode]
+
+    var segmentStart = 0
+    while (segmentStart < path.path.size) {
+      val method = path.path(segmentStart).method
+      var segmentEnd = segmentStart
+      while (segmentEnd + 1 < path.path.size && path.path(segmentEnd + 1).method == method) {
+        segmentEnd += 1
+      }
+
+      if (segmentEnd > segmentStart) {
+        val segmentPathNodes = path.path.slice(segmentStart, segmentEnd + 1).toSet
+        val segment         = cfgSegment(path.path(segmentStart), path.path(segmentEnd))
+        val relevantControls = segment.controls.filter { control =>
+          controlsPathNode(control, segmentPathNodes) &&
+          (conditionDependsOnPath(control, segmentPathNodes) || conditionDependsOnSources(control, taintSources))
+        }
+        val conditionNodes = relevantControls.flatMap(_.condition.ast.collectAll[CfgNode]).distinct
+        val conditionNodeSet = conditionNodes.toSet
+        val controlNodeSet   = relevantControls.toSet
+        val dependentBodyNodes = segment.nodes.filter { candidate =>
+          relevantControls.exists(controlsBranchNode(_, candidate)) && dependsOnPath(candidate, taintNodes)
+        }
+        val additions = (segment.nodes.filter(node => controlNodeSet.contains(node) || conditionNodeSet.contains(node)) ++
+          dependentBodyNodes ++ relevantControls ++ conditionNodes).distinct
+        val insertionIndex = segmentEnd - 1
+        val insertion      = insertions.getOrElseUpdate(insertionIndex, mutable.LinkedHashSet.empty[CfgNode])
+        additions.foreach { candidate =>
+          if (!taintNodes.contains(candidate) && insertedNodes.add(candidate)) insertion += candidate
+        }
+      }
+
+      segmentStart = segmentEnd + 1
+    }
+
+    val result = mutable.ListBuffer.empty[CfgNode]
+    path.path.zipWithIndex.foreach { case (node, index) =>
+      result += node
+      insertions.get(index).foreach(result ++= _)
+    }
+    path.copy(path = result.toList)
+  }
+
+  private case class CfgSegment(nodes: List[CfgNode], controls: List[ControlStructure])
+
+  private def cfgSegment(from: CfgNode, to: CfgNode): CfgSegment = {
+    val nodes    = mutable.LinkedHashSet.empty[CfgNode]
+    val controls = mutable.LinkedHashSet.empty[ControlStructure]
+    val worklist = mutable.Queue(from)
+    val visited  = mutable.Set.empty[CfgNode]
+
+    def successors(node: CfgNode): Iterator[CfgNode] = node match {
+      case _: MethodParameterIn => node.method.cfgFirst
+      case _                    => node.cfgNext
+    }
+
+    while (worklist.nonEmpty) {
+      val node = worklist.dequeue()
+      if (visited.add(node)) {
+        nodes += node
+        collectEnclosingControls(node, controls)
+
+        if (node != to) {
+          successors(node).foreach(worklist.enqueue(_))
+        }
+      }
+    }
+
+    CfgSegment(nodes.toList, controls.toList)
+  }
+
+  private def collectEnclosingControls(
+    node: CfgNode,
+    controls: mutable.LinkedHashSet[ControlStructure]
+  ): Unit = {
+    node match {
+      case control: ControlStructure => controls += control
+      case _                         =>
+    }
+
+    val visited = mutable.Set.empty[ControlStructure]
+    var current: AstNode = node
+    var closest = current.getClosest[ControlStructure]
+    while (closest.nonEmpty && visited.add(closest.get)) {
+      val control = closest.get
+      controls += control
+      current = control
+      closest = current.getClosest[ControlStructure]
+    }
+  }
+
+  private def controlsPathNode(control: ControlStructure, pathNodes: Set[CfgNode]): Boolean = {
+    pathNodes.exists(node => control.whenTrue.ast.contains(node) || control.whenFalse.ast.contains(node))
+  }
+
+  private def conditionDependsOnSources(control: ControlStructure, taintSources: Set[CfgNode]): Boolean = {
+    val worklist = mutable.Queue.empty[CfgNode]
+    val visited  = mutable.Set.empty[CfgNode]
+    control.condition.ast.collectAll[CfgNode].foreach(worklist.enqueue(_))
+
+    while (worklist.nonEmpty) {
+      val node = worklist.dequeue()
+      if (visited.add(node)) {
+        if (taintSources.contains(node)) return true
+        node.in(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach(worklist.enqueue(_))
+      }
+    }
+    false
+  }
+
+  private def conditionDependsOnPath(control: ControlStructure, pathNodes: Set[CfgNode]): Boolean = {
+    val worklist = mutable.Queue.empty[CfgNode]
+    val visited  = mutable.Set.empty[CfgNode]
+    control.condition.ast.collectAll[CfgNode].foreach(worklist.enqueue(_))
+
+    while (worklist.nonEmpty) {
+      val node = worklist.dequeue()
+      if (visited.add(node)) {
+        if (pathNodes.contains(node)) return true
+        node.in(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach(worklist.enqueue(_))
+      }
+    }
+    false
+  }
+
+  private def controlsBranchNode(control: ControlStructure, node: CfgNode): Boolean = {
+    control.whenTrue.ast.contains(node) || control.whenFalse.ast.contains(node)
+  }
+
+  private def dependsOnPath(node: CfgNode, pathNodes: Set[CfgNode]): Boolean = {
+    val worklist = mutable.Queue(node)
+    val visited  = mutable.Set.empty[CfgNode]
+
+    while (worklist.nonEmpty) {
+      val current = worklist.dequeue()
+      if (visited.add(current)) {
+        if (pathNodes.contains(current)) return true
+        current.out(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach(worklist.enqueue(_))
+      }
+    }
+    false
+  }
+}

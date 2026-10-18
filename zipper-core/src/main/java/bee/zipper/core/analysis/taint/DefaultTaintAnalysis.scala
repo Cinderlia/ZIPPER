@@ -28,10 +28,13 @@ class DefaultTaintAnalysis(
   enableDeduplicateFlow: Boolean = true,
   enableCustomSanitizer: Boolean = false,
   enableKeywordMatching: Boolean = false,
-  aliasFinder: Option[AliasFinder] = None
+  aliasFinder: Option[AliasFinder] = None,
+  enableControlStructure: Boolean = false
 ) extends TaintAnalysis {
   private val language   = cpg.metaData.language.head
   private val pathFilter = new PathFilter(cpg, vsa, language, exploitMode, enableCustomSanitizer, enableKeywordMatching)
+  private val controlStructurePathEnhancer = new ControlStructurePathEnhancer
+  private val taintSourceNodes = sources.toSet
 
   override def analyze(): TaintAnalysisResult = {
     implicit val context: EngineContext = {
@@ -54,7 +57,12 @@ class DefaultTaintAnalysis(
       // step2. remove duplicate flows if exploit mode is disabled
       val deduplicated = if (!exploitMode && enableDeduplicateFlow) DuplicateFlowProcessor.deduplicate(flows) else flows
       // step3. transform joern `Path` into `TaintPath`
-      val taintPaths = deduplicated.map(path => TaintPath(kind, true, extractCfgNodes(path)))
+      val taintPaths = deduplicated
+        .map(path => TaintPath(kind, true, extractCfgNodes(path)))
+        .map(path =>
+          if (enableControlStructure) controlStructurePathEnhancer.enhance(path, taintSourceNodes)
+          else path
+        )
       // step4. filter out invalid paths
       val validatedPaths = taintPaths.filter(path => pathFilter.isValid(path))
       // step5. filter paths based on lightweight path-reachability
@@ -105,7 +113,8 @@ object DefaultTaintAnalysis {
     enableCustomSanitizer: Boolean = false,
     enableKeywordMatching: Boolean = false,
     enableIndirectSuperGlobalFetching: Boolean = true,
-    aliasFinder: Option[AliasFinder] = None
+    aliasFinder: Option[AliasFinder] = None,
+    enableControlStructure: Boolean = false
   ): DefaultTaintAnalysis = {
     val sources = {
       val searcher =
@@ -127,7 +136,8 @@ object DefaultTaintAnalysis {
       enableDeduplicateFlow,
       enableCustomSanitizer,
       enableKeywordMatching,
-      aliasFinder
+      aliasFinder,
+      enableControlStructure
     )
   }
 }

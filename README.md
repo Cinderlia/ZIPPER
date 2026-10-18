@@ -76,6 +76,8 @@ If your codebase uses custom recursive XSS sanitization functions, you can activ
 
 Reachability reports can be generated with `--enable-reachability-report=path` or `--enable-reachability-report=debug`. Both options write `output/reachability-path-report.json`; `debug` also writes `output/reachability-debug-report.json`. Report generation runs reachability checks but does not filter paths unless `--enable-reachability-analysis` is also enabled.
 
+Use `--enable-ControlStructure` to add CFG-reachable control structures that contain taint-path nodes or whose conditions depend on taint-path values. The option is disabled by default.
+
 
 
 # Docker Image
