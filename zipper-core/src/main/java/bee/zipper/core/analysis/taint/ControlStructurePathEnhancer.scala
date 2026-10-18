@@ -28,8 +28,13 @@ final class ControlStructurePathEnhancer {
         val segmentPathNodes = path.path.slice(segmentStart, segmentEnd + 1).toSet
         val segment         = cfgSegment(path.path(segmentStart), path.path(segmentEnd))
         val relevantControls = segment.controls.filter { control =>
-          controlsPathNode(control, segmentPathNodes) &&
-          (conditionDependsOnPath(control, segmentPathNodes) || conditionDependsOnSources(control, taintSources))
+          val branchPathNodes = controlsPathNodes(control, segmentPathNodes)
+          val branchDependentNodes = segment.nodes.filter { candidate =>
+            controlsBranchNode(control, candidate) && dependsOnPath(candidate, taintNodes)
+          }
+          val conditionIsTainted = conditionDependsOnPath(control, segmentPathNodes) ||
+            conditionDependsOnSources(control, taintSources, segment.nodes)
+          conditionIsTainted && (branchPathNodes.nonEmpty || branchDependentNodes.nonEmpty)
         }
         val conditionNodes = relevantControls.flatMap(_.condition.ast.collectAll[CfgNode]).distinct
         val conditionNodeSet = conditionNodes.toSet
@@ -37,8 +42,12 @@ final class ControlStructurePathEnhancer {
         val dependentBodyNodes = segment.nodes.filter { candidate =>
           relevantControls.exists(controlsBranchNode(_, candidate)) && dependsOnPath(candidate, taintNodes)
         }
+        val dependentStatements = dependentBodyNodes.flatMap {
+          case call: Call if call.isGenericAssignment => Some(call)
+          case node                                    => node.getClosest[Call].filter(_.isGenericAssignment)
+        }
         val additions = (segment.nodes.filter(node => controlNodeSet.contains(node) || conditionNodeSet.contains(node)) ++
-          dependentBodyNodes ++ relevantControls ++ conditionNodes).distinct
+          dependentBodyNodes ++ dependentStatements ++ relevantControls ++ conditionNodes).distinct
         val insertionIndex = segmentEnd - 1
         val insertion      = insertions.getOrElseUpdate(insertionIndex, mutable.LinkedHashSet.empty[CfgNode])
         additions.foreach { candidate =>
@@ -105,23 +114,40 @@ final class ControlStructurePathEnhancer {
     }
   }
 
-  private def controlsPathNode(control: ControlStructure, pathNodes: Set[CfgNode]): Boolean = {
-    pathNodes.exists(node => control.whenTrue.ast.contains(node) || control.whenFalse.ast.contains(node))
+  private def controlsPathNodes(control: ControlStructure, pathNodes: Set[CfgNode]): List[CfgNode] = {
+    pathNodes.toList.filter(node => control.whenTrue.ast.contains(node) || control.whenFalse.ast.contains(node))
   }
 
-  private def conditionDependsOnSources(control: ControlStructure, taintSources: Set[CfgNode]): Boolean = {
-    val worklist = mutable.Queue.empty[CfgNode]
-    val visited  = mutable.Set.empty[CfgNode]
-    control.condition.ast.collectAll[CfgNode].foreach(worklist.enqueue(_))
+  private def conditionDependsOnSources(
+    control: ControlStructure,
+    taintSources: Set[CfgNode],
+    segmentNodes: List[CfgNode]
+  ): Boolean = {
+    val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
+    if (traceDependency(conditionNodes, taintSources, forward = false).matched.nonEmpty) return true
 
-    while (worklist.nonEmpty) {
-      val node = worklist.dequeue()
-      if (visited.add(node)) {
-        if (taintSources.contains(node)) return true
-        node.in(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach(worklist.enqueue(_))
+    val conditionVariables = control.condition.ast.collectAll[Identifier].map(_.code).toSet
+    val assignments = segmentNodes.collect { case call: Call if call.isGenericAssignment => call }
+    val taintedVariables = mutable.Set.empty[String]
+    var changed           = true
+
+    while (changed) {
+      changed = false
+      assignments.foreach { assignment =>
+        val targetName = assignment.argumentOption(1).map(_.code)
+        val value      = assignment.argumentOption(2)
+        val valueIsTainted = value.exists { rhs =>
+          taintSources.exists(source => source == rhs || rhs.ast.contains(source)) ||
+          traceDependency(List(rhs), taintSources, forward = false).matched.nonEmpty ||
+          rhs.ast.collectAll[Identifier].exists(identifier => taintedVariables.contains(identifier.code))
+        }
+        targetName.foreach { name =>
+          if (valueIsTainted && taintedVariables.add(name)) changed = true
+        }
       }
     }
-    false
+
+    conditionVariables.exists(taintedVariables.contains)
   }
 
   private def conditionDependsOnPath(control: ControlStructure, pathNodes: Set[CfgNode]): Boolean = {
@@ -137,6 +163,31 @@ final class ControlStructurePathEnhancer {
       }
     }
     false
+  }
+
+  private case class DependencyTrace(visited: List[CfgNode], matched: Option[CfgNode])
+
+  private def traceDependency(
+    startNodes: Iterable[CfgNode],
+    targets: Set[CfgNode],
+    forward: Boolean
+  ): DependencyTrace = {
+    val worklist = mutable.Queue.empty[CfgNode]
+    val visited  = mutable.LinkedHashSet.empty[CfgNode]
+    worklist ++= startNodes
+    var matched = Option.empty[CfgNode]
+
+    while (worklist.nonEmpty && matched.isEmpty) {
+      val node = worklist.dequeue()
+      if (visited.add(node)) {
+        if (targets.contains(node)) matched = Some(node)
+        else {
+          val adjacent = if (forward) node.out(EdgeTypes.REACHING_DEF) else node.in(EdgeTypes.REACHING_DEF)
+          adjacent.collectAll[CfgNode].foreach(worklist.enqueue(_))
+        }
+      }
+    }
+    DependencyTrace(visited.toList, matched)
   }
 
   private def controlsBranchNode(control: ControlStructure, node: CfgNode): Boolean = {
