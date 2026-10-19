@@ -46,6 +46,21 @@ class DefaultTaintAnalysis(
       )
     }
 
+    val controlFlowTracer =
+      if (enableControlStructure)
+        Some(
+          new TaintControlFlowTracer(
+            sources,
+            (source, conditionNodes) =>
+              conditionNodes
+                .reachableByFlows(List(source))
+                .map(path => extractCfgNodes(path))
+                .toList,
+            controlStructurePathEnhancer
+          )
+        )
+      else None
+
     // iterate over each vulnerability kind and its associated sinks to compute taint paths.
     val paths = kindToSinks.iterator.flatMap { case (kind, taintSinks) =>
       val (sinks, argumentToCall) = extractSinks(taintSinks)
@@ -60,8 +75,10 @@ class DefaultTaintAnalysis(
       val taintPaths = deduplicated
         .map(path => TaintPath(kind, true, extractCfgNodes(path)))
         .map(path =>
-          if (enableControlStructure) controlStructurePathEnhancer.enhance(path, taintSourceNodes)
-          else path
+          if (enableControlStructure) {
+            val enhanced = controlStructurePathEnhancer.enhance(path, taintSourceNodes)
+            controlFlowTracer.get.expand(enhanced)
+          } else path
         )
       // step4. filter out invalid paths
       val validatedPaths = taintPaths.filter(path => pathFilter.isValid(path))
