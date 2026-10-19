@@ -9,7 +9,9 @@ import scala.collection.mutable
 
 /** Traces other taint sources that influence already-selected control structures. */
 final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
-  private val cachedPaths = mutable.ListBuffer.empty[List[CfgNode]]
+  private case class CachedTrace(sourceId: Long, controlId: Long, nodes: List[CfgNode])
+
+  private val cachedPaths = mutable.ListBuffer.empty[CachedTrace]
 
   def enhance(path: TaintPath): TaintPath = {
     if (path.path.isEmpty) return path
@@ -28,7 +30,9 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
             val insertionIndex = result.indexWhere(_.id() == control.id())
             if (insertionIndex >= 0) {
               val newNodes = nodes.filterNot(node => result.exists(_.id() == node.id()))
-              if (newNodes.nonEmpty) result.insertAll(insertionIndex, newNodes)
+              if (newNodes.nonEmpty) {
+                result.insertAll(insertionIndex, newNodes)
+              }
               newNodes.collect { case nested: ControlStructure => nested }.foreach(worklist.enqueue(_))
             }
           }
@@ -40,31 +44,31 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   }
 
   private def traceFor(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = {
-    cachedPath(source, control).orElse {
-      findDataPath(source, control).flatMap { dataPath =>
+    findDataPath(source, control).flatMap { dataPath =>
+      cachedPath(source, control).orElse {
         val trace = buildTrace(source, control, dataPath)
-        trace.foreach(cachePath)
+        trace.foreach(nodes => cachePath(source, control, nodes))
         trace
       }
     }
   }
 
   private def cachedPath(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = {
-    cachedPaths.iterator.flatMap { nodes =>
-      val sourceIndex  = nodes.indexWhere(_.id() == source.id())
-      val controlIndex = nodes.indexWhere(_.id() == control.id())
-      if (sourceIndex >= 0 && controlIndex >= sourceIndex) Some(nodes.slice(sourceIndex, controlIndex + 1))
-      else None
-    }.take(1).toList.headOption
+    cachedPaths
+      .find(trace => trace.sourceId == source.id() && trace.controlId == control.id())
+      .map(_.nodes)
   }
 
-  private def cachePath(path: List[CfgNode]): Unit = {
-    val contained = cachedPaths.filter(existing => isSubsequence(existing, path))
+  private def cachePath(source: CfgNode, control: ControlStructure, path: List[CfgNode]): Unit = {
+    val matchingEndpoints = cachedPaths.filter(trace =>
+      trace.sourceId == source.id() && trace.controlId == control.id()
+    )
+    val contained = matchingEndpoints.filter(trace => isSubsequence(trace.nodes, path))
     if (contained.nonEmpty) {
       cachedPaths --= contained
-      cachedPaths += path
-    } else if (!cachedPaths.exists(existing => isSubsequence(path, existing))) {
-      cachedPaths += path
+      cachedPaths += CachedTrace(source.id(), control.id(), path)
+    } else if (!matchingEndpoints.exists(trace => isSubsequence(path, trace.nodes))) {
+      cachedPaths += CachedTrace(source.id(), control.id(), path)
     }
   }
 
@@ -104,7 +108,7 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
         if (targets.contains(node)) matched = Some(node)
         else {
           node.out(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach { successor =>
-            if (!visited.contains(successor)) {
+            if (isDataFlowNode(successor) && !visited.contains(successor)) {
               parent.getOrElseUpdate(successor, node)
               worklist += successor
             }
@@ -114,6 +118,11 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
     }
 
     matched.map(target => reconstructPath(source, target, parent))
+  }
+
+  private def isDataFlowNode(node: CfgNode): Boolean = node match {
+    case _: (Method | ControlStructure | FieldIdentifier | JumpTarget | MethodReturn) => false
+    case _                                                                            => true
   }
 
   private def reconstructPath(
@@ -182,7 +191,6 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
         .sortBy(_.size)
         .headOption
       variableTrace.map(trace => distinctNodes(trace ++ List(rhs)))
-        .orElse(findReachingDefPath(source, Set(rhs)))
     }
   }
 
