@@ -34,6 +34,7 @@ class DefaultTaintAnalysis(
   private val language   = cpg.metaData.language.head
   private val pathFilter = new PathFilter(cpg, vsa, language, exploitMode, enableCustomSanitizer, enableKeywordMatching)
   private val controlStructurePathEnhancer = new ControlStructurePathEnhancer
+  private val taintControlFlowProvenance = new TaintControlFlowProvenance(sources.toSet)
   private val taintSourceNodes = sources.toSet
 
   override def analyze(): TaintAnalysisResult = {
@@ -45,21 +46,6 @@ class DefaultTaintAnalysis(
         EngineConfig(maxArgsToAllow = 3000, strict = strict, exploitMode = exploitMode, aliasFinder = aliasFinder)
       )
     }
-
-    val controlFlowTracer =
-      if (enableControlStructure)
-        Some(
-          new TaintControlFlowTracer(
-            sources,
-            (source, conditionNodes) =>
-              conditionNodes
-                .reachableByFlows(List(source))
-                .map(path => extractCfgNodes(path))
-                .toList,
-            controlStructurePathEnhancer
-          )
-        )
-      else None
 
     // iterate over each vulnerability kind and its associated sinks to compute taint paths.
     val paths = kindToSinks.iterator.flatMap { case (kind, taintSinks) =>
@@ -76,8 +62,8 @@ class DefaultTaintAnalysis(
         .map(path => TaintPath(kind, true, extractCfgNodes(path)))
         .map(path =>
           if (enableControlStructure) {
-            val enhanced = controlStructurePathEnhancer.enhance(path, taintSourceNodes)
-            controlFlowTracer.get.expand(enhanced)
+            val selectedControlPath = controlStructurePathEnhancer.enhance(path, taintSourceNodes)
+            taintControlFlowProvenance.enhance(selectedControlPath)
           } else path
         )
       // step4. filter out invalid paths

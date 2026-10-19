@@ -28,12 +28,13 @@ final class ControlStructurePathEnhancer {
         val segmentPathNodes = path.path.slice(segmentStart, segmentEnd + 1).toSet
         val segment         = cfgSegment(path.path(segmentStart), path.path(segmentEnd))
         val relevantControls = segment.controls.filter { control =>
-          val currentSourceBranchNodes = controlsPathNodes(control, segmentPathNodes)
-          val branchTaintedNodes = segment.nodes.filter { candidate =>
+          val branchPathNodes = controlsPathNodes(control, segmentPathNodes)
+          val branchDependentNodes = segment.nodes.filter { candidate =>
             controlsBranchNode(control, candidate) && dependsOnPath(candidate, taintNodes)
           }
-          val conditionIsTaintedByAnySource = conditionDependsOnSources(control, taintSources, segment.nodes)
-          conditionIsTaintedByAnySource && (currentSourceBranchNodes.nonEmpty || branchTaintedNodes.nonEmpty)
+          val conditionIsTainted = conditionDependsOnPath(control, segmentPathNodes) ||
+            conditionDependsOnSources(control, taintSources, segment.nodes)
+          conditionIsTainted && (branchPathNodes.nonEmpty || branchDependentNodes.nonEmpty)
         }
         val conditionNodes = relevantControls.flatMap(_.condition.ast.collectAll[CfgNode]).distinct
         val conditionNodeSet = conditionNodes.toSet
@@ -147,6 +148,21 @@ final class ControlStructurePathEnhancer {
     }
 
     conditionVariables.exists(taintedVariables.contains)
+  }
+
+  private def conditionDependsOnPath(control: ControlStructure, pathNodes: Set[CfgNode]): Boolean = {
+    val worklist = mutable.Queue.empty[CfgNode]
+    val visited  = mutable.Set.empty[CfgNode]
+    control.condition.ast.collectAll[CfgNode].foreach(worklist.enqueue(_))
+
+    while (worklist.nonEmpty) {
+      val node = worklist.dequeue()
+      if (visited.add(node)) {
+        if (pathNodes.contains(node)) return true
+        node.in(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach(worklist.enqueue(_))
+      }
+    }
+    false
   }
 
   private case class DependencyTrace(visited: List[CfgNode], matched: Option[CfgNode])
