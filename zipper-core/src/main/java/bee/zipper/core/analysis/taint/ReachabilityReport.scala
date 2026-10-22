@@ -19,7 +19,8 @@ object ReachabilityReportMode {
     case ""      => None
     case "path"  => Some(Path)
     case "debug" => Some(Debug)
-    case other   => throw new IllegalArgumentException(s"Unsupported reachability report mode: $other (use path or debug)")
+    case other =>
+      throw new IllegalArgumentException(s"Unsupported reachability report mode: $other (use path or debug)")
   }
 }
 
@@ -32,11 +33,11 @@ final class ReachabilityReportCollector(val mode: ReachabilityReportMode) {
     method: Option[String]
   ) {
     def toJson: Json = Json.obj(
-      "nodeId" -> Json.fromLong(nodeId),
+      "nodeId"     -> Json.fromLong(nodeId),
       "sourcePath" -> sourcePath.map(Json.fromString).getOrElse(Json.Null),
-      "line" -> line.map(Json.fromInt).getOrElse(Json.Null),
-      "source" -> source.map(Json.fromString).getOrElse(Json.Null),
-      "method" -> method.map(Json.fromString).getOrElse(Json.Null)
+      "line"       -> line.map(Json.fromInt).getOrElse(Json.Null),
+      "source"     -> source.map(Json.fromString).getOrElse(Json.Null),
+      "method"     -> method.map(Json.fromString).getOrElse(Json.Null)
     )
   }
 
@@ -50,32 +51,29 @@ final class ReachabilityReportCollector(val mode: ReachabilityReportMode) {
     var guard: Option[String] = None
   ) {
     def toJson(index: Int): Json = Json.obj(
-      "pairIndex" -> Json.fromInt(index),
-      "from" -> from.toJson,
-      "to" -> to.toJson,
+      "pairIndex"  -> Json.fromInt(index),
+      "from"       -> from.toJson,
+      "to"         -> to.toJson,
       "sameMethod" -> Json.fromBoolean(sameMethod),
-      "evaluated" -> Json.fromBoolean(evaluated),
-      "reachable" -> reachable.map(Json.fromBoolean).getOrElse(Json.Null),
-      "cacheHit" -> Json.fromBoolean(cacheHit),
-      "guard" -> guard.map(Json.fromString).getOrElse(Json.Null)
+      "evaluated"  -> Json.fromBoolean(evaluated),
+      "reachable"  -> reachable.map(Json.fromBoolean).getOrElse(Json.Null),
+      "cacheHit"   -> Json.fromBoolean(cacheHit),
+      "guard"      -> guard.map(Json.fromString).getOrElse(Json.Null)
     )
   }
 
   private case class PathEntry(id: Int, kind: Option[String], nodes: List[SourceInfo], pairs: List[PairEntry]) {
     def toJson: Json = Json.obj(
       "pathId" -> Json.fromInt(id),
-      "kind" -> kind.map(Json.fromString).getOrElse(Json.Null),
-      "nodes" -> Json.fromValues(nodes.map(_.toJson)),
-      "pairs" -> Json.fromValues(pairs.zipWithIndex.map { case (pair, index) => pair.toJson(index) })
+      "kind"   -> kind.map(Json.fromString).getOrElse(Json.Null),
+      "nodes"  -> Json.fromValues(nodes.map(_.toJson)),
+      "pairs"  -> Json.fromValues(pairs.zipWithIndex.map { case (pair, index) => pair.toJson(index) })
     )
   }
 
   private case class NodeVisit(order: Int, node: SourceInfo, guard: String) {
-    def toJson: Json = Json.obj(
-      "order" -> Json.fromInt(order),
-      "node" -> node.toJson,
-      "guard" -> Json.fromString(guard)
-    )
+    def toJson: Json =
+      Json.obj("order" -> Json.fromInt(order), "node" -> node.toJson, "guard" -> Json.fromString(guard))
   }
 
   private case class DebugEntry(
@@ -90,14 +88,14 @@ final class ReachabilityReportCollector(val mode: ReachabilityReportMode) {
     visits: List[NodeVisit]
   ) {
     def toJson: Json = Json.obj(
-      "pathId" -> Json.fromInt(pathId),
-      "pairIndex" -> Json.fromInt(pairIndex),
-      "from" -> from.toJson,
-      "to" -> to.toJson,
-      "cacheHit" -> Json.fromBoolean(cacheHit),
-      "reachable" -> Json.fromBoolean(reachable),
-      "guard" -> guard.map(Json.fromString).getOrElse(Json.Null),
-      "stopReason" -> stopReason.map(Json.fromString).getOrElse(Json.Null),
+      "pathId"       -> Json.fromInt(pathId),
+      "pairIndex"    -> Json.fromInt(pairIndex),
+      "from"         -> from.toJson,
+      "to"           -> to.toJson,
+      "cacheHit"     -> Json.fromBoolean(cacheHit),
+      "reachable"    -> Json.fromBoolean(reachable),
+      "guard"        -> guard.map(Json.fromString).getOrElse(Json.Null),
+      "stopReason"   -> stopReason.map(Json.fromString).getOrElse(Json.Null),
       "visitedNodes" -> Json.fromValues(visits.map(_.toJson))
     )
   }
@@ -108,7 +106,7 @@ final class ReachabilityReportCollector(val mode: ReachabilityReportMode) {
   def includesDebug: Boolean = mode.includesDebug
 
   def beginPath(path: List[CfgNode], kind: Option[String]): Int = synchronized {
-    val id = pathEntries.size
+    val id    = pathEntries.size
     val nodes = path.map(sourceInfo)
     val pairs = path.zip(path.drop(1)).map { case (from, to) =>
       PairEntry(sourceInfo(from), sourceInfo(to), from.method == to.method)
@@ -117,20 +115,15 @@ final class ReachabilityReportCollector(val mode: ReachabilityReportMode) {
     id
   }
 
-  def recordPair(
-    pathId: Int,
-    pairIndex: Int,
-    reachable: Boolean,
-    cacheHit: Boolean,
-    guard: Option[String]
-  ): Unit = synchronized {
-    pathEntries.lift(pathId).flatMap(_.pairs.lift(pairIndex)).foreach { pair =>
-      pair.evaluated = true
-      pair.reachable = Some(reachable)
-      pair.cacheHit = cacheHit
-      pair.guard = guard
+  def recordPair(pathId: Int, pairIndex: Int, reachable: Boolean, cacheHit: Boolean, guard: Option[String]): Unit =
+    synchronized {
+      pathEntries.lift(pathId).flatMap(_.pairs.lift(pairIndex)).foreach { pair =>
+        pair.evaluated = true
+        pair.reachable = Some(reachable)
+        pair.cacheHit = cacheHit
+        pair.guard = guard
+      }
     }
-  }
 
   def recordBfs(
     pathId: Int,
@@ -182,7 +175,7 @@ final class ReachabilityReportCollector(val mode: ReachabilityReportMode) {
     val pathReport = synchronized {
       Json.obj(
         "reportType" -> Json.fromString("reachability-path"),
-        "paths" -> Json.fromValues(pathEntries.map(_.toJson))
+        "paths"      -> Json.fromValues(pathEntries.map(_.toJson))
       )
     }
     writeJson(outputDir, "reachability-path-report.json", pathReport)
@@ -191,7 +184,7 @@ final class ReachabilityReportCollector(val mode: ReachabilityReportMode) {
       val debugReport = synchronized {
         Json.obj(
           "reportType" -> Json.fromString("reachability-debug"),
-          "bfsRuns" -> Json.fromValues(debugEntries.map(_.toJson))
+          "bfsRuns"    -> Json.fromValues(debugEntries.map(_.toJson))
         )
       }
       writeJson(outputDir, "reachability-debug-report.json", debugReport)
@@ -207,10 +200,6 @@ final class ReachabilityReportCollector(val mode: ReachabilityReportMode) {
   )
 
   private def writeJson(outputDir: String, fileName: String, json: Json): Unit = {
-    Files.writeString(
-      Paths.get(outputDir).resolve(fileName),
-      json.spaces2,
-      StandardCharsets.UTF_8
-    )
+    Files.writeString(Paths.get(outputDir).resolve(fileName), json.spaces2, StandardCharsets.UTF_8)
   }
 }

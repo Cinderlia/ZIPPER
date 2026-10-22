@@ -36,6 +36,7 @@ class DefaultTaintAnalysis(
   private val controlStructurePathEnhancer = new ControlStructurePathEnhancer
   private val taintControlFlowProvenance   = new TaintControlFlowProvenance(sources.toSet)
   private val taintSourceNodes             = sources.toSet
+  private val emptySinkTracer = new EmptySinkControlFlowTracer(taintSourceNodes, taintControlFlowProvenance)
 
   override def analyze(): TaintAnalysisResult = {
     implicit val context: EngineContext = {
@@ -112,17 +113,37 @@ class DefaultTaintAnalysis(
     ExtractedSinks(probes, argumentToCall, sinks)
   }
 
-  /** builds single-node paths for sinks that no taint flow reaches
+  /** builds paths for sinks that no taint flow reaches
     *
     * This is only used in control-structure mode, where every sink is reported even if it has no tainted input. A sink
-    * is considered untainted when it is not the endpoint of any taint path collected for the same vulnerability kind;
-    * its path therefore contains the sink itself only. A call sink is represented by its call node, like tainted paths.
+    * is considered untainted when it is not the endpoint of any taint path collected for the same vulnerability kind.
+    * For such a sink we try to reconstruct the guard that explains it: walking the CFG backwards, the nearest enclosing
+    * control structure with a tainted condition contributes its provenance, so the path becomes `source ... ->
+    * condition -> control structure -> sink`. When no guard is tainted the path stays the sink itself.
     */
   private def untaintedSinkPaths(kind: String, sinks: List[CfgNode], taintedPaths: List[TaintPath]): List[TaintPath] = {
     val taintedSinks = taintedPaths.map(_.sink).toSet
     sinks
       .filterNot(taintedSinks.contains)
-      .map(sink => TaintPath(kind, true, List(sink)))
+      .map(sink => emptySinkPath(kind, sink, taintedPaths))
+  }
+
+  /** builds the path of a single sink that no taint flow reaches
+    *
+    * The reconstructed path goes through the guard, but it still has to pass the sanitizer checks. When it does not,
+    * the sink is kept as a single-node path: control-structure mode reports every sink, and dropping it entirely would
+    * lose the coverage that the empty-sink handling exists for.
+    *
+    * @see
+    *   [[untaintedSinkPaths]]
+    */
+  private def emptySinkPath(kind: String, sink: CfgNode, taintedPaths: List[TaintPath]): TaintPath = {
+    val singleNodePath = TaintPath(kind, true, List(sink))
+    emptySinkTracer
+      .trace(sink, taintedPaths)
+      .map(nodes => taintControlFlowProvenance.enhance(TaintPath(kind, true, nodes)))
+      .filter(pathFilter.isValid)
+      .getOrElse(singleNodePath)
   }
 
   /** refactor a path by appending the real sink node if it exists in given map

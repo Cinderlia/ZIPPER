@@ -18,10 +18,7 @@ import scala.collection.mutable
   *
   * See ISSTA'12 Static Memory Leak Detection Using Full-Sparse Value-Flow Analysis
   */
-class ReachabilityAnalysis(
-  vsa: ValueSetResult,
-  reportCollector: Option[ReachabilityReportCollector] = None
-) {
+class ReachabilityAnalysis(vsa: ValueSetResult, reportCollector: Option[ReachabilityReportCollector] = None) {
   private val flowToReachable = mutable.Map.empty[(CfgNode, CfgNode), Boolean]
 
   def isReachable(path: List[CfgNode], kind: Option[String] = None): Boolean = {
@@ -31,43 +28,33 @@ class ReachabilityAnalysis(
       implicit val callstack: CallStack = new CallStack
       // check whether an unreachable path exists
       path.sliding(2).zipWithIndex.forall {
-        case (List(from, to), pairIndex) if isInSameMethod(from, to) => // why we call `isBranchCondition` here? remove now
+        case (List(from, to), pairIndex)
+            if isInSameMethod(from, to) => // why we call `isBranchCondition` here? remove now
           callstack.updateByValueFlow(from, to)
           flowToReachable.get((from, to)) match {
             case Some(reachable) =>
               reportPathId.foreach { pathId =>
-                reportCollector.foreach(
-                  _.recordPair(pathId, pairIndex, reachable, cacheHit = true, guard = None)
-                )
+                reportCollector.foreach(_.recordPair(pathId, pairIndex, reachable, cacheHit = true, guard = None))
                 reportCollector.foreach(_.recordCacheHit(pathId, pairIndex, reachable))
               }
               reachable
             case None =>
               val valueFlowCodes = path.map(_.code).toSet
-              val guard = cfgGuard(from, to, valueFlowCodes, reportPathId.map(_ -> pairIndex))
+              val guard          = cfgGuard(from, to, valueFlowCodes, reportPathId.map(_ -> pairIndex))
               val simplified = guard match {
                 case BoolLiteral(false) => false
                 case _                  => true
               }
               flowToReachable += (from, to) -> simplified
               reportPathId.foreach(pathId =>
-                reportCollector.foreach(
-                  _.recordPair(
-                    pathId,
-                    pairIndex,
-                    simplified,
-                    cacheHit = false,
-                    guard = Some(guard.toString)
-                  )
-                )
+                reportCollector
+                  .foreach(_.recordPair(pathId, pairIndex, simplified, cacheHit = false, guard = Some(guard.toString)))
               )
               simplified
           }
         case (List(_, _), pairIndex) =>
           reportPathId.foreach(pathId =>
-            reportCollector.foreach(
-              _.recordPair(pathId, pairIndex, reachable = true, cacheHit = false, guard = None)
-            )
+            reportCollector.foreach(_.recordPair(pathId, pairIndex, reachable = true, cacheHit = false, guard = None))
           )
           true
         case _ => true
@@ -88,12 +75,9 @@ class ReachabilityAnalysis(
     * @param valueFlowCodes
     *   the value flow of taint path
     */
-  private def cfgGuard(
-    from: CfgNode,
-    to: CfgNode,
-    valueFlowCodes: Set[String],
-    reportContext: Option[(Int, Int)]
-  )(implicit callstack: CallStack): BoolTerm = {
+  private def cfgGuard(from: CfgNode, to: CfgNode, valueFlowCodes: Set[String], reportContext: Option[(Int, Int)])(
+    implicit callstack: CallStack
+  ): BoolTerm = {
     val debugVisits =
       if (reportCollector.exists(_.includesDebug)) Some(mutable.ListBuffer.empty[(CfgNode, String)]) else None
 

@@ -16,10 +16,10 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   def enhance(path: TaintPath): TaintPath = {
     if (path.path.isEmpty) return path
 
-    val mainSource = path.source
-    val result     = mutable.ArrayBuffer.from(path.path)
+    val mainSource        = path.source
+    val result            = mutable.ArrayBuffer.from(path.path)
     val processedControls = mutable.Set.empty[Long]
-    val worklist = mutable.Queue.empty[ControlStructure]
+    val worklist          = mutable.Queue.empty[ControlStructure]
     worklist ++= path.path.collect { case control: ControlStructure => control }
 
     while (worklist.nonEmpty) {
@@ -43,6 +43,13 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
     path.copy(path = result.toList)
   }
 
+  /** Data-dependency path from `source` to the condition of `control`, if the condition depends on `source`.
+    *
+    * This is the same trace used while propagating taint sources into control structures, exposed so that other
+    * provenance strategies (e.g. [[EmptySinkControlFlowTracer]]) can reuse it instead of reimplementing the search.
+    */
+  def dataPath(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = findDataPath(source, control)
+
   private def traceFor(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = {
     findDataPath(source, control).flatMap { dataPath =>
       cachedPath(source, control).orElse {
@@ -60,9 +67,8 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   }
 
   private def cachePath(source: CfgNode, control: ControlStructure, path: List[CfgNode]): Unit = {
-    val matchingEndpoints = cachedPaths.filter(trace =>
-      trace.sourceId == source.id() && trace.controlId == control.id()
-    )
+    val matchingEndpoints =
+      cachedPaths.filter(trace => trace.sourceId == source.id() && trace.controlId == control.id())
     val contained = matchingEndpoints.filter(trace => isSubsequence(trace.nodes, path))
     if (contained.nonEmpty) {
       cachedPaths --= contained
@@ -83,8 +89,8 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
 
   private def buildTrace(source: CfgNode, control: ControlStructure, dataPath: List[CfgNode]): Option[List[CfgNode]] = {
     val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
-    val start         = sourceAssignment(source).getOrElse(source)
-    val controls      = controlsOnCfgRoute(start, control, conditionNodes.toSet)
+    val start          = sourceAssignment(source).getOrElse(source)
+    val controls       = controlsOnCfgRoute(start, control, conditionNodes.toSet)
     Some(distinctNodes(dataPath ++ controls ++ conditionNodes ++ List(control)))
   }
 
@@ -144,9 +150,9 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
     control: ControlStructure,
     conditionNodes: List[CfgNode]
   ): Option[List[CfgNode]] = {
-    val assignments = control.method.cfgNode.collectAll[Call].filter(_.isGenericAssignment).toList
+    val assignments      = control.method.cfgNode.collectAll[Call].filter(_.isGenericAssignment).toList
     val taintedVariables = mutable.Map.empty[String, List[CfgNode]]
-    var changed = true
+    var changed          = true
 
     def addTaintedVariable(name: String, path: List[CfgNode]): Unit = {
       taintedVariables.get(name) match {
@@ -163,8 +169,8 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
         val target = assignment.argumentOption(1)
         val value  = assignment.argumentOption(2)
         for {
-          lhs <- target
-          rhs <- value
+          lhs   <- target
+          rhs   <- value
           trace <- valueTrace(source, rhs, taintedVariables.toMap)
         } addTaintedVariable(lhs.code, distinctNodes(trace ++ List(assignment, lhs)))
       }
@@ -172,7 +178,9 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
 
     val conditionVariables = conditionNodes.collect { case identifier: Identifier => identifier }
     conditionVariables.iterator
-      .flatMap(identifier => taintedVariables.get(identifier.code).map(trace => distinctNodes(trace ++ List(identifier))))
+      .flatMap(identifier =>
+        taintedVariables.get(identifier.code).map(trace => distinctNodes(trace ++ List(identifier)))
+      )
       .toList
       .sortBy(_.size)
       .headOption
@@ -185,7 +193,8 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   ): Option[List[CfgNode]] = {
     if (rhs == source || rhs.ast.contains(source)) Some(List(source, rhs))
     else {
-      val variableTrace = rhs.ast.collectAll[Identifier]
+      val variableTrace = rhs.ast
+        .collectAll[Identifier]
         .flatMap(identifier => taintedVariables.get(identifier.code))
         .toList
         .sortBy(_.size)
@@ -195,7 +204,8 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   }
 
   private def sourceAssignment(source: CfgNode): Option[Call] = {
-    source.method.cfgNode.collectAll[Call]
+    source.method.cfgNode
+      .collectAll[Call]
       .filter(call => call.isGenericAssignment && call.argumentOption(2).exists(_.ast.contains(source)))
       .toList
       .sortBy(_.order)
@@ -237,9 +247,9 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
       case _                         =>
     }
 
-    val visited = mutable.Set.empty[ControlStructure]
+    val visited          = mutable.Set.empty[ControlStructure]
     var current: AstNode = node
-    var closest = current.getClosest[ControlStructure]
+    var closest          = current.getClosest[ControlStructure]
     while (closest.nonEmpty && visited.add(closest.get)) {
       val control = closest.get
       controls += control

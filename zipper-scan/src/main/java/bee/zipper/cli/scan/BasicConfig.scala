@@ -138,9 +138,8 @@ class EngineConfig {
   @CommandLine.Option(
     names = Array("--enable-reachability-report"),
     paramLabel = "<path|debug>",
-    description = Array(
-      "Generate reachability JSON reports; filtering remains controlled by --enable-reachability-analysis"
-    ),
+    description =
+      Array("Generate reachability JSON reports; filtering remains controlled by --enable-reachability-analysis"),
     arity = "1"
   )
   var enableReachabilityReport: String = ""

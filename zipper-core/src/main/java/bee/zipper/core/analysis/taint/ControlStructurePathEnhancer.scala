@@ -18,7 +18,7 @@ final class ControlStructurePathEnhancer {
 
     var segmentStart = 0
     while (segmentStart < path.path.size) {
-      val method = path.path(segmentStart).method
+      val method     = path.path(segmentStart).method
       var segmentEnd = segmentStart
       while (segmentEnd + 1 < path.path.size && path.path(segmentEnd + 1).method == method) {
         segmentEnd += 1
@@ -26,7 +26,7 @@ final class ControlStructurePathEnhancer {
 
       if (segmentEnd > segmentStart) {
         val segmentPathNodes = path.path.slice(segmentStart, segmentEnd + 1).toSet
-        val segment         = cfgSegment(path.path(segmentStart), path.path(segmentEnd))
+        val segment          = cfgSegment(path.path(segmentStart), path.path(segmentEnd))
         val relevantControls = segment.controls.filter { control =>
           val branchPathNodes = controlsPathNodes(control, segmentPathNodes)
           val branchDependentNodes = segment.nodes.filter { candidate =>
@@ -36,7 +36,7 @@ final class ControlStructurePathEnhancer {
             conditionDependsOnSources(control, taintSources, segment.nodes)
           conditionIsTainted && (branchPathNodes.nonEmpty || branchDependentNodes.nonEmpty)
         }
-        val conditionNodes = relevantControls.flatMap(_.condition.ast.collectAll[CfgNode]).distinct
+        val conditionNodes   = relevantControls.flatMap(_.condition.ast.collectAll[CfgNode]).distinct
         val conditionNodeSet = conditionNodes.toSet
         val controlNodeSet   = relevantControls.toSet
         val dependentBodyNodes = segment.nodes.filter { candidate =>
@@ -44,10 +44,11 @@ final class ControlStructurePathEnhancer {
         }
         val dependentStatements = dependentBodyNodes.flatMap {
           case call: Call if call.isGenericAssignment => Some(call)
-          case node                                    => node.getClosest[Call].filter(_.isGenericAssignment)
+          case node                                   => node.getClosest[Call].filter(_.isGenericAssignment)
         }
-        val additions = (segment.nodes.filter(node => controlNodeSet.contains(node) || conditionNodeSet.contains(node)) ++
-          dependentBodyNodes ++ dependentStatements ++ relevantControls ++ conditionNodes).distinct
+        val additions =
+          (segment.nodes.filter(node => controlNodeSet.contains(node) || conditionNodeSet.contains(node)) ++
+            dependentBodyNodes ++ dependentStatements ++ relevantControls ++ conditionNodes).distinct
         val insertionIndex = segmentEnd - 1
         val insertion      = insertions.getOrElseUpdate(insertionIndex, mutable.LinkedHashSet.empty[CfgNode])
         additions.foreach { candidate =>
@@ -94,18 +95,15 @@ final class ControlStructurePathEnhancer {
     CfgSegment(nodes.toList, controls.toList)
   }
 
-  private def collectEnclosingControls(
-    node: CfgNode,
-    controls: mutable.LinkedHashSet[ControlStructure]
-  ): Unit = {
+  private def collectEnclosingControls(node: CfgNode, controls: mutable.LinkedHashSet[ControlStructure]): Unit = {
     node match {
       case control: ControlStructure => controls += control
       case _                         =>
     }
 
-    val visited = mutable.Set.empty[ControlStructure]
+    val visited          = mutable.Set.empty[ControlStructure]
     var current: AstNode = node
-    var closest = current.getClosest[ControlStructure]
+    var closest          = current.getClosest[ControlStructure]
     while (closest.nonEmpty && visited.add(closest.get)) {
       val control = closest.get
       controls += control
@@ -127,9 +125,9 @@ final class ControlStructurePathEnhancer {
     if (traceDependency(conditionNodes, taintSources, forward = false).matched.nonEmpty) return true
 
     val conditionVariables = control.condition.ast.collectAll[Identifier].map(_.code).toSet
-    val assignments = segmentNodes.collect { case call: Call if call.isGenericAssignment => call }
-    val taintedVariables = mutable.Set.empty[String]
-    var changed           = true
+    val assignments        = segmentNodes.collect { case call: Call if call.isGenericAssignment => call }
+    val taintedVariables   = mutable.Set.empty[String]
+    var changed            = true
 
     while (changed) {
       changed = false

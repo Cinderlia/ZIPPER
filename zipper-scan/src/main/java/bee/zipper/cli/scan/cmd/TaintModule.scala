@@ -32,7 +32,8 @@ class TaintModule extends AppModule {
 
   override def run(): Unit = {
     val outputDir = basicConfig.outputDir
-    val reachabilityReport = ReachabilityReportMode.parse(basicConfig.engineConfig.enableReachabilityReport)
+    val reachabilityReport = ReachabilityReportMode
+      .parse(basicConfig.engineConfig.enableReachabilityReport)
       .map(new ReachabilityReportCollector(_))
     FileSys.ensureDirectoryExists(outputDir)
     // Load custom configurations if provided
