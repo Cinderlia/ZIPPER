@@ -34,8 +34,8 @@ class DefaultTaintAnalysis(
   private val language   = cpg.metaData.language.head
   private val pathFilter = new PathFilter(cpg, vsa, language, exploitMode, enableCustomSanitizer, enableKeywordMatching)
   private val controlStructurePathEnhancer = new ControlStructurePathEnhancer
-  private val taintControlFlowProvenance = new TaintControlFlowProvenance(sources.toSet)
-  private val taintSourceNodes = sources.toSet
+  private val taintControlFlowProvenance   = new TaintControlFlowProvenance(sources.toSet)
+  private val taintSourceNodes             = sources.toSet
 
   override def analyze(): TaintAnalysisResult = {
     implicit val context: EngineContext = {
@@ -49,36 +49,55 @@ class DefaultTaintAnalysis(
 
     // iterate over each vulnerability kind and its associated sinks to compute taint paths.
     val paths = kindToSinks.iterator.flatMap { case (kind, taintSinks) =>
-      val (sinks, argumentToCall) = extractSinks(taintSinks)
+      val extractedSinks = extractSinks(taintSinks)
       // step1. joern taint engine entrypoint
       val flows =
-        sinks
+        extractedSinks.probes
           .reachableByFlows(sources)
-          .map(path => refactorPath(path, argumentToCall)) // refactor paths by appending real sink nodes if needed
+          .map(path =>
+            refactorPath(path, extractedSinks.argumentToCall)
+          ) // refactor paths by appending real sink nodes if needed
       // step2. remove duplicate flows if exploit mode is disabled
       val deduplicated = if (!exploitMode && enableDeduplicateFlow) DuplicateFlowProcessor.deduplicate(flows) else flows
       // step3. transform joern `Path` into `TaintPath`
-      val taintPaths = deduplicated
-        .map(path => TaintPath(kind, true, extractCfgNodes(path)))
-        .map(path =>
-          if (enableControlStructure) {
-            val selectedControlPath = controlStructurePathEnhancer.enhance(path, taintSourceNodes)
-            taintControlFlowProvenance.enhance(selectedControlPath)
-          } else path
-        )
-      // step4. filter out invalid paths
-      val validatedPaths = taintPaths.filter(path => pathFilter.isValid(path))
-      // step5. filter paths based on lightweight path-reachability
+      val taintPaths = deduplicated.map(path => TaintPath(kind, true, extractCfgNodes(path)))
+      // step4. enhance taint paths with the control structures that guard or depend on them
+      val enhancedPaths = taintPaths.map { path =>
+        if (enableControlStructure) {
+          val selectedControlPath = controlStructurePathEnhancer.enhance(path, taintSourceNodes)
+          taintControlFlowProvenance.enhance(selectedControlPath)
+        } else path
+      }
+      // step5. in control-structure mode, also keep sinks that receive no taint: their path is the sink itself
+      val collectedPaths =
+        if (enableControlStructure) {
+          val taintedPaths = enhancedPaths.toList
+          (taintedPaths ++ untaintedSinkPaths(kind, extractedSinks.sinks, taintedPaths)).iterator
+        } else enhancedPaths
+      // step6. filter out invalid paths
+      val validatedPaths = collectedPaths.filter(path => pathFilter.isValid(path))
+      // step7. filter paths based on lightweight path-reachability
       if (enableReachAnalysis) validatedPaths.filter(path => pathFilter.isReachable(path)) else validatedPaths
     }
 
     TaintAnalysisResult(paths, context.newDataflowEdges)
   }
 
+  /** the nodes needed to run the taint engine for a set of sinks
+    *
+    * @param probes
+    *   nodes handed to the taint engine, i.e. the arguments of a call sink or a direct sink node
+    * @param argumentToCall
+    *   maps an argument probe to the real sink, i.e. its enclosing call
+    * @param sinks
+    *   real sink nodes, i.e. the endpoints of the resulting taint paths
+    */
+  private case class ExtractedSinks(probes: List[CfgNode], argumentToCall: Map[CfgNode, CfgNode], sinks: List[CfgNode])
+
   /** extract the sink nodes in CPG and builds a mapping from argument nodes to their corresponding calls
     */
-  private def extractSinks(taintSinks: List[TaintSink]): (List[CfgNode], Map[CfgNode, CfgNode]) = {
-    val sinks = taintSinks.flatMap {
+  private def extractSinks(taintSinks: List[TaintSink]): ExtractedSinks = {
+    val probes = taintSinks.flatMap {
       case DirectNodeSink(node)           => List(node)
       case CallArgumentSink(_, arguments) => arguments
     }
@@ -86,7 +105,24 @@ class DefaultTaintAnalysis(
       .collect { case CallArgumentSink(call, arguments) => arguments.map(_ -> call) }
       .flatten
       .toMap
-    (sinks, argumentToCall)
+    val sinks = taintSinks.map {
+      case DirectNodeSink(node)      => node
+      case CallArgumentSink(call, _) => call
+    }.distinct
+    ExtractedSinks(probes, argumentToCall, sinks)
+  }
+
+  /** builds single-node paths for sinks that no taint flow reaches
+    *
+    * This is only used in control-structure mode, where every sink is reported even if it has no tainted input. A sink
+    * is considered untainted when it is not the endpoint of any taint path collected for the same vulnerability kind;
+    * its path therefore contains the sink itself only. A call sink is represented by its call node, like tainted paths.
+    */
+  private def untaintedSinkPaths(kind: String, sinks: List[CfgNode], taintedPaths: List[TaintPath]): List[TaintPath] = {
+    val taintedSinks = taintedPaths.map(_.sink).toSet
+    sinks
+      .filterNot(taintedSinks.contains)
+      .map(sink => TaintPath(kind, true, List(sink)))
   }
 
   /** refactor a path by appending the real sink node if it exists in given map

@@ -42,3 +42,4 @@ build/
 /workspace/
 /.idea/libraries/scala_sdk_2_13_10.xml
 *.zip
+.dsh-acl-recovery/
