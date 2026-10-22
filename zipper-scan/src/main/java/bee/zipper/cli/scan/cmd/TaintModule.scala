@@ -186,10 +186,9 @@ object TaintCmd {
 
     reachabilityReport.foreach(_.writeReports(outputDir))
 
-    val pathCluster      = new TaintPathCluster(taintPaths)
     val newDataflowEdges = taintAnalysisResult.newDataflowEdges.asScala.map(x => (x._1.code, x._2.code)).toSet
     val clusters =
-      pathCluster.cluster().map(paths => constructCluster(paths, newDataflowEdges))
+      PathChainMerger.merge(taintPaths).map(paths => constructCluster(paths, newDataflowEdges))
     val summary = AnalysisSummary(clusters.size, vulnCount, clusters)
     jsonStream.println(renderSummary(summary))
     jsonStream.flush()
