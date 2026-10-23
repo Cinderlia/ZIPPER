@@ -29,15 +29,17 @@ class DefaultTaintAnalysis(
   enableCustomSanitizer: Boolean = false,
   enableKeywordMatching: Boolean = false,
   aliasFinder: Option[AliasFinder] = None,
-  enableControlStructure: Boolean = false
+  enableControlStructure: Boolean = false,
+  enableImplicitTaint: Boolean = false
 ) extends TaintAnalysis {
   private val language   = cpg.metaData.language.head
   private val pathFilter = new PathFilter(cpg, vsa, language, exploitMode, enableCustomSanitizer, enableKeywordMatching)
   private val controlStructurePathEnhancer = new ControlStructurePathEnhancer
   private val taintControlFlowProvenance   = new TaintControlFlowProvenance(sources.toSet)
   private val taintSourceNodes             = sources.toSet
-  private val emptySinkTracer = new EmptySinkControlFlowTracer(taintSourceNodes, taintControlFlowProvenance)
-  private val sinkGroupMerger = new SinkGroupMerger
+  private val emptySinkTracer       = new EmptySinkControlFlowTracer(taintSourceNodes, taintControlFlowProvenance)
+  private val sinkGroupMerger       = new SinkGroupMerger
+  private val implicitTaintEnhancer = new ImplicitTaintEnhancer(emptySinkTracer)
 
   override def analyze(): TaintAnalysisResult = {
     implicit val context: EngineContext = {
@@ -84,8 +86,13 @@ class DefaultTaintAnalysis(
       // step7. merge sinks that share a straight-line CFG segment, reporting their paths together
       val mergedPaths =
         if (enableControlStructure) sinkGroupMerger.merge(collectedPaths) else collectedPaths
-      // step8. filter paths based on lightweight path-reachability
-      if (enableReachAnalysis) mergedPaths.filter(path => pathFilter.isReachable(path)) else mergedPaths
+      // step8. add the implicit taint of flags that are assigned under a tainted guard
+      val implicitPaths =
+        if (enableControlStructure && enableImplicitTaint)
+          mergedPaths.map(path => implicitTaintEnhancer.enhance(path, mergedPaths))
+        else mergedPaths
+      // step9. filter paths based on lightweight path-reachability
+      if (enableReachAnalysis) implicitPaths.filter(path => pathFilter.isReachable(path)) else implicitPaths
     }
 
     TaintAnalysisResult(paths, context.newDataflowEdges)
@@ -181,7 +188,8 @@ object DefaultTaintAnalysis {
     enableKeywordMatching: Boolean = false,
     enableIndirectSuperGlobalFetching: Boolean = true,
     aliasFinder: Option[AliasFinder] = None,
-    enableControlStructure: Boolean = false
+    enableControlStructure: Boolean = false,
+    enableImplicitTaint: Boolean = false
   ): DefaultTaintAnalysis = {
     val sources = {
       val searcher =
@@ -204,7 +212,8 @@ object DefaultTaintAnalysis {
       enableCustomSanitizer,
       enableKeywordMatching,
       aliasFinder,
-      enableControlStructure
+      enableControlStructure,
+      enableImplicitTaint
     )
   }
 }

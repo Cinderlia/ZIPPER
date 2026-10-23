@@ -152,7 +152,8 @@ object TaintCmd {
           enableKeywordMatching = c.enableSanitizerKeywordMatching,
           enableIndirectSuperGlobalFetching = c.enableIndirectSuperGlobalFetching,
           aliasFinder = aliasFinder,
-          enableControlStructure = c.enableControlStructure
+          enableControlStructure = c.enableControlStructure,
+          enableImplicitTaint = c.enableImplicitTaint
         )
     val result = taintAnalysis.analyze()
     if (c.enableReachabilityAnalysis || reachabilityReport.nonEmpty) {

@@ -151,6 +151,14 @@ class EngineConfig {
   var enableControlStructure: Boolean = false
 
   @CommandLine.Option(
+    names = Array("--enable-Implicit-taint"),
+    description = Array(
+      "Add implicit taint to taint paths, i.e. flags assigned under a tainted guard; requires --enable-ControlStructure"
+    )
+  )
+  var enableImplicitTaint: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--enable-custom-sanitizer-recognizer"),
     description = Array("Enable custom sanitizer recognizer for recursive sanitizers")
   )
