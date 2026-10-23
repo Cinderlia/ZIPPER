@@ -37,6 +37,7 @@ class DefaultTaintAnalysis(
   private val taintControlFlowProvenance   = new TaintControlFlowProvenance(sources.toSet)
   private val taintSourceNodes             = sources.toSet
   private val emptySinkTracer = new EmptySinkControlFlowTracer(taintSourceNodes, taintControlFlowProvenance)
+  private val sinkGroupMerger = new SinkGroupMerger
 
   override def analyze(): TaintAnalysisResult = {
     implicit val context: EngineContext = {
@@ -77,8 +78,11 @@ class DefaultTaintAnalysis(
         } else enhancedPaths
       // step6. filter out invalid paths
       val validatedPaths = collectedPaths.filter(path => pathFilter.isValid(path))
-      // step7. filter paths based on lightweight path-reachability
-      if (enableReachAnalysis) validatedPaths.filter(path => pathFilter.isReachable(path)) else validatedPaths
+      // step7. merge sinks that share a straight-line CFG segment, reporting their paths together
+      val segmentPaths =
+        if (enableControlStructure) sinkGroupMerger.merge(validatedPaths.toList).iterator else validatedPaths
+      // step8. filter paths based on lightweight path-reachability
+      if (enableReachAnalysis) segmentPaths.filter(path => pathFilter.isReachable(path)) else segmentPaths
     }
 
     TaintAnalysisResult(paths, context.newDataflowEdges)
