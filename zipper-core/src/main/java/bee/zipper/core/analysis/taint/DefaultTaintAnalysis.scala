@@ -69,20 +69,23 @@ class DefaultTaintAnalysis(
           val selectedControlPath = controlStructurePathEnhancer.enhance(path, taintSourceNodes)
           taintControlFlowProvenance.enhance(selectedControlPath)
         } else path
-      }
-      // step5. in control-structure mode, also keep sinks that receive no taint: their path is the sink itself
-      val collectedPaths =
+      }.toList
+      // step5. drop sanitized/invalid taint paths. In control-structure mode the default path filter is
+      //        bypassed on purpose: the appended control-flow slices contain guards such as `$x != ""`,
+      //        whose comparison calls are configured as type sanitizers and would reject paths that are
+      //        in fact tainted. Dedicated sanitizer handling for this mode is added separately.
+      val validatedTaintPaths =
+        if (enableControlStructure) enhancedPaths else enhancedPaths.filter(path => pathFilter.isValid(path))
+      // step6. in control-structure mode, also keep sinks that receive no taint: their path is the sink itself
+      val collectedPaths: List[TaintPath] =
         if (enableControlStructure) {
-          val taintedPaths = enhancedPaths.toList
-          (taintedPaths ++ untaintedSinkPaths(kind, extractedSinks.sinks, taintedPaths)).iterator
+          enhancedPaths ++ untaintedSinkPaths(kind, extractedSinks.sinks, enhancedPaths)
         } else enhancedPaths
-      // step6. filter out invalid paths
-      val validatedPaths = collectedPaths.filter(path => pathFilter.isValid(path))
       // step7. merge sinks that share a straight-line CFG segment, reporting their paths together
-      val segmentPaths =
-        if (enableControlStructure) sinkGroupMerger.merge(validatedPaths.toList).iterator else validatedPaths
+      val mergedPaths =
+        if (enableControlStructure) sinkGroupMerger.merge(collectedPaths) else collectedPaths
       // step8. filter paths based on lightweight path-reachability
-      if (enableReachAnalysis) segmentPaths.filter(path => pathFilter.isReachable(path)) else segmentPaths
+      if (enableReachAnalysis) mergedPaths.filter(path => pathFilter.isReachable(path)) else mergedPaths
     }
 
     TaintAnalysisResult(paths, context.newDataflowEdges)
@@ -134,20 +137,20 @@ class DefaultTaintAnalysis(
 
   /** builds the path of a single sink that no taint flow reaches
     *
-    * The reconstructed path goes through the guard, but it still has to pass the sanitizer checks. When it does not,
-    * the sink is kept as a single-node path: control-structure mode reports every sink, and dropping it entirely would
-    * lose the coverage that the empty-sink handling exists for.
+    * The reconstructed path goes through the guard. In control-structure mode the default path filter is bypassed (see
+    * [[analyze]]), so the traced path is kept as is; otherwise it still has to pass the sanitizer checks, and when it
+    * does not the sink is kept as a single-node path so that no sink is lost.
     *
     * @see
     *   [[untaintedSinkPaths]]
     */
   private def emptySinkPath(kind: String, sink: CfgNode, taintedPaths: List[TaintPath]): TaintPath = {
     val singleNodePath = TaintPath(kind, true, List(sink))
-    emptySinkTracer
+    val tracedPath = emptySinkTracer
       .trace(sink, taintedPaths)
       .map(nodes => taintControlFlowProvenance.enhance(TaintPath(kind, true, nodes)))
-      .filter(pathFilter.isValid)
-      .getOrElse(singleNodePath)
+    if (enableControlStructure) tracedPath.getOrElse(singleNodePath)
+    else tracedPath.filter(pathFilter.isValid).getOrElse(singleNodePath)
   }
 
   /** refactor a path by appending the real sink node if it exists in given map
