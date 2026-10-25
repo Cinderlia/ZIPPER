@@ -41,8 +41,23 @@ trait TaintSinkSearcher(cpg: Cpg, vsa: ValueSetResult) {
         val functionCalls = searchFunctionCalls(allFunctionCalls, sinks.functions)
         val methodCalls   = searchMethodCalls(allMethodCalls, sinks.methods)
 
-        kind -> (functionCalls ++ methodCalls).filter(sink => validator.validate(sink, kind))
+        val candidates = (functionCalls ++ methodCalls).filter(sink => validator.validate(sink, kind))
+        kind -> filterByStatementKind(kind, candidates)
       }
+  }
+
+  /** When the sink configuration requests a SQL statement kind (read/write), keep only the sinks whose executed
+    * statement matches it. Calls whose statement cannot be classified are kept.
+    */
+  private def filterByStatementKind(kind: String, sinks: List[TaintSink]): List[TaintSink] = {
+    SourceSinkSpecManager.getSinkStatementKind match {
+      case Some(required) if kind.toLowerCase.contains("sql") =>
+        sinks.filter {
+          case CallArgumentSink(call, _) => SqlStatementClassifier.kindOfCall(call).forall(_ == required)
+          case _                         => true
+        }
+      case _ => sinks
+    }
   }
 
   /** Searches for function calls that match given sink specifications.

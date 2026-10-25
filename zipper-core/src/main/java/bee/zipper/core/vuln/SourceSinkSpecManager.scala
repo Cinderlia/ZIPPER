@@ -1,5 +1,6 @@
 package bee.zipper.core.vuln
 
+import bee.zipper.core.analysis.taint.sourcesink.{SqlStatementKind}
 import bee.zipper.util.sys.FileSys
 import io.circe.*
 import io.circe.generic.auto.*
@@ -11,17 +12,21 @@ case class GlobalVarSourceSpec(name: String, allowKeys: Option[List[String]] = N
 
 case class MethodCallSourceSpec(typeName: Option[String], receiverName: Option[String], methodName: String)
 
+/** SQL query sources: calls that read rows from a database (SELECT-like statements only). */
+case class SqlQuerySourceSpec(functions: List[FunCallSinkSpec] = Nil, methods: List[MethodCallSinkSpec] = Nil)
+
 case class LanguageSourceSpec(
   globals: List[GlobalVarSourceSpec] = Nil,
   functions: List[String] = Nil,
-  methods: List[MethodCallSourceSpec] = Nil
+  methods: List[MethodCallSourceSpec] = Nil,
+  sqlQueries: Option[SqlQuerySourceSpec] = None
 )
 
 type TaintSourceSpec = Map[String, LanguageSourceSpec] // language -> language source
 
 object TaintSourceSpec {
   def fromJson(json: String): Option[TaintSourceSpec] = {
-    parser.decode[TaintSourceSpec](json).toOption
+    SpecJson.stripConfig(json).flatMap(_.as[TaintSourceSpec].toOption)
   }
 
   def toJson(sourceSpec: TaintSourceSpec): String = {
@@ -34,8 +39,16 @@ object TaintSourceSpec {
       .groupBy(_._1)
       .view
       .mapValues { grouped =>
-        val sources = grouped.map(_._2)
-        LanguageSourceSpec(sources.flatMap(_.globals), sources.flatMap(_.functions), sources.flatMap(_.methods))
+        val sources    = grouped.map(_._2)
+        val sqlQueries = sources.flatMap(_.sqlQueries)
+        LanguageSourceSpec(
+          sources.flatMap(_.globals),
+          sources.flatMap(_.functions),
+          sources.flatMap(_.methods),
+          if (sqlQueries.isEmpty) None
+          else
+            Some(SqlQuerySourceSpec(sqlQueries.flatMap(_.functions).distinct, sqlQueries.flatMap(_.methods).distinct))
+        )
       }
       .toMap
   }
@@ -63,7 +76,7 @@ type TaintSinkSpec = Map[String, LanguageSinkSpec] // language -> language sink
 
 object TaintSinkSpec {
   def fromJson(json: String): Option[TaintSinkSpec] = {
-    parser.decode[TaintSinkSpec](json).toOption
+    SpecJson.stripConfig(json).flatMap(_.as[TaintSinkSpec].toOption)
   }
 
   def toJson(sinkSpec: TaintSinkSpec): String = {
@@ -94,10 +107,29 @@ object TaintSinkSpec {
   }
 }
 
+private object SpecJson {
+
+  /** Parses the JSON document and removes the optional `_config` section so the remainder can be decoded as the
+    * language map.
+    */
+  def stripConfig(json: String): Option[Json] =
+    parser.parse(json).toOption.flatMap(j => j.asObject.map(o => Json.fromJsonObject(o.remove("_config"))))
+
+  /** Reads `_config.statementKind`; an absent, empty or unknown value disables the filter. */
+  def statementKind(json: String): Option[SqlStatementKind] =
+    parser
+      .parse(json)
+      .toOption
+      .flatMap(_.hcursor.downField("_config").downField("statementKind").as[Option[String]].toOption.flatten)
+      .flatMap(value => SqlStatementKind.parse(Some(value)))
+}
+
 object SourceSinkSpecManager {
-  private var sources: TaintSourceSpec             = Map.empty
-  private var sinks: TaintSinkSpec                 = Map.empty
-  private var activeVulnKinds: Option[Set[String]] = None
+  private var sources: TaintSourceSpec                      = Map.empty
+  private var sinks: TaintSinkSpec                          = Map.empty
+  private var activeVulnKinds: Option[Set[String]]          = None
+  private var sinkStatementKind: Option[SqlStatementKind]   = None
+  private var sourceStatementKind: Option[SqlStatementKind] = None
 
   loadDefaultConfig()
 
@@ -108,6 +140,7 @@ object SourceSinkSpecManager {
         .getOrElse(throw new RuntimeException(s"failed to parse source config"))
     }
     sources = TaintSourceSpec.merge(specs)
+    sourceStatementKind = configs.flatMap(SpecJson.statementKind).lastOption
   }
 
   def loadSinks(configs: List[String]): Unit = {
@@ -115,6 +148,7 @@ object SourceSinkSpecManager {
       TaintSinkSpec.fromJson(content).getOrElse(throw new RuntimeException(s"failed to parse sink config"))
     }
     sinks = TaintSinkSpec.merge(specs)
+    sinkStatementKind = configs.flatMap(SpecJson.statementKind).lastOption
   }
 
   def loadDefaultConfig(): Unit = {
@@ -208,6 +242,12 @@ object SourceSinkSpecManager {
       case None          => all
     }
   }
+
+  /** Statement kind requested for SQL sinks, if the split is enabled in the sink configuration. */
+  def getSinkStatementKind: Option[SqlStatementKind] = sinkStatementKind
+
+  /** Statement kind requested for SQL query sources, if the split is enabled in the source configuration. */
+  def getSourceStatementKind: Option[SqlStatementKind] = sourceStatementKind
 
   def allSources: TaintSourceSpec = sources
 
