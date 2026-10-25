@@ -139,7 +139,7 @@ object SourceSinkSpecManager {
         .fromJson(content)
         .getOrElse(throw new RuntimeException(s"failed to parse source config"))
     }
-    sources = TaintSourceSpec.merge(specs)
+    sources = TaintSourceSpec.merge(sources :: specs)
     sourceStatementKind = configs.flatMap(SpecJson.statementKind).lastOption
   }
 
@@ -147,7 +147,7 @@ object SourceSinkSpecManager {
     val specs: List[TaintSinkSpec] = configs.map { content =>
       TaintSinkSpec.fromJson(content).getOrElse(throw new RuntimeException(s"failed to parse sink config"))
     }
-    sinks = TaintSinkSpec.merge(specs)
+    sinks = TaintSinkSpec.merge(sinks :: specs)
     sinkStatementKind = configs.flatMap(SpecJson.statementKind).lastOption
   }
 

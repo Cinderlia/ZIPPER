@@ -10,8 +10,8 @@ object DuplicateFlowProcessor {
     paths
       .groupBy { path =>
         // use node.code instead of node
-        val head = path.elements.headOption.map(x => (x.code, x.file.name.headOption)).get
-        val last = path.elements.lastOption.map(x => (x.code, x.file.name.headOption)).get
+        val head = path.elements.headOption.map(x => (x.code, x.file.name.headOption, x.lineNumber)).get
+        val last = path.elements.lastOption.map(x => (x.code, x.file.name.headOption, x.lineNumber)).get
         (head, last)
       }
       .flatMap { case (_, list) => list.headOption }

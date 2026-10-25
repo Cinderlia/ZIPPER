@@ -48,10 +48,17 @@ class TaintModule extends AppModule {
         if (!basicConfig.projectConfig.isLoadingCpgMode) {
           CpgGeneration.applyPHPPasses(cpg, api, basicConfig.engineConfig)
         }
-        // Traditional taint analysis mode
-        val taintAnalysisResult =
-          executeStaticTaintAnalysis(basicConfig.engineConfig, cpg, api, reachabilityReport)
-        generateReport(taintAnalysisResult, outputDir, true, reachabilityReport)
+        val naviPath = basicConfig.engineConfig.customNaviConfig
+        if (naviPath != null && naviPath.nonEmpty) {
+          // Navigation chain mode: several source/sink segments, each reported separately
+          logger.info(s"Running navigation analysis from: $naviPath")
+          NaviAnalysis.run(NaviConfig.load(naviPath), cpg, api, basicConfig.engineConfig, outputDir)
+        } else {
+          // Traditional taint analysis mode
+          val taintAnalysisResult =
+            executeStaticTaintAnalysis(basicConfig.engineConfig, cpg, api, reachabilityReport)
+          generateReport(taintAnalysisResult, outputDir, true, reachabilityReport)
+        }
         // save cpg to file
         try cpg.close()
         catch { case ex: Exception => logger.warn("Error while closing CPG", ex) }

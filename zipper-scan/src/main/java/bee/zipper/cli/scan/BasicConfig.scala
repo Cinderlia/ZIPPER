@@ -194,6 +194,12 @@ class EngineConfig {
   var customSinkConfigs: List[String] = new ArrayList[String]()
 
   @CommandLine.Option(
+    names = Array("--custom-navi"),
+    description = Array("Custom navigation chain configuration file path (JSON)")
+  )
+  var customNaviConfig: String = ""
+
+  @CommandLine.Option(
     names = Array("--custom-sanitizer"),
     split = ",",
     description = Array("Custom sanitizer configuration file paths (comma-separated)")

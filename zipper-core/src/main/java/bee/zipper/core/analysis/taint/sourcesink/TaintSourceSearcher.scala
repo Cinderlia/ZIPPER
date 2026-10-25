@@ -34,6 +34,9 @@ trait TaintSourceSearcher {
   /** Searches for all taint sinks and their wrappers in the CPG.
     */
   def search(): (List[CfgNode], List[Method])
+
+  /** Calls that read rows from the database, as configured by the `sqlQueries` source section. */
+  def sqlQuerySources(): List[Call] = Nil
 }
 
 class PythonTaintSourceSearcher(cpg: Cpg, vfg: Vfg) extends TaintSourceSearcher {
@@ -99,6 +102,8 @@ class PHPTaintSourceSearcher(
   private val sqlQueryCalls               = locateSqlQueryCalls()
 
   override def search(): (List[CfgNode], List[Method]) = identifySourcesAndWrappers()
+
+  override def sqlQuerySources(): List[Call] = sqlQueryCalls
 
   private def identifySourcesAndWrappers(): (List[CfgNode], List[Method]) = {
     def isLiteralFetching(call: Call): Boolean = {
