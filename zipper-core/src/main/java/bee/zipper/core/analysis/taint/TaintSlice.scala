@@ -67,10 +67,10 @@ object TaintSliceBuilder {
   }
 }
 
-/** Compact, LLM-oriented view of one sink: a short ordered list of significant steps. Identifiers, literals, `tmp`
-  * variables and return markers are dropped so the flow reads like a story with an explicit source and sink.
+/** Compact, LLM-oriented view of one sink reached from one source. The steps keep only significant nodes so the flow
+  * reads like a story with an explicit source and sink.
   */
-case class CompactFlow(kind: String, sink: String, params: List[String], steps: List[String])
+case class CompactFlow(kind: String, sink: String, source: String, param: Option[String], steps: List[String])
 
 object CompactFlowBuilder {
 
@@ -149,29 +149,32 @@ object CompactFlowBuilder {
     out.toList
   }
 
+  /** One flow per (sink, source): every source keeps its own dataflow, distinct routes are all preserved. */
   def build(paths: List[TaintPath], sources: Set[CfgNode]): List[CompactFlow] = {
     val sourceIds = sources.map(_.id())
-    paths
-      .groupBy(_.sink.id())
-      .values
-      .toList
-      .map { group =>
-        val sink       = group.head.sink
-        val withSteps  = group.map(path => (path, stepsOf(path, sourceIds)))
-        val (_, steps) = withSteps.maxBy(_._2.size)
-        val params = withSteps
-          .flatMap(_._1.path)
-          .filter(node => sourceIds.contains(node.id()))
-          .flatMap(node => param(node.code))
-          .distinct
-          .sorted
-        CompactFlow(
-          kind = group.head.kind,
-          sink = s"${fileOf(sink)}:${lineOf(sink)}  ${sink.code}",
-          params = params,
-          steps = steps
-        )
+    val bySink    = paths.groupBy(_.sink.id())
+
+    bySink.values.toList
+      .flatMap { group =>
+        val sink = group.head.sink
+        val flows = group.map { path =>
+          val source = path.path.head
+          CompactFlow(
+            kind = path.kind,
+            sink = s"${fileOf(sink)}:${lineOf(sink)}  ${sink.code}",
+            source = s"${fileOf(source)}:${lineOf(source)}  ${source.code}",
+            param = param(source.code),
+            steps = stepsOf(path, sourceIds)
+          )
+        }
+        // one representative flow per (sink, source): every input keeps its own dataflow, alternative routes of the
+        // same input are collapsed into the most complete one
+        flows
+          .groupBy(flow => (flow.source, flow.param))
+          .values
+          .map(_.maxBy(_.steps.size))
+          .toList
       }
-      .sortBy(flow => flow.sink)
+      .sortBy(flow => (flow.sink, flow.source))
   }
 }
