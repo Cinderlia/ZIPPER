@@ -95,7 +95,9 @@ class DefaultTaintAnalysis(
       if (enableReachAnalysis) implicitPaths.filter(path => pathFilter.isReachable(path)) else implicitPaths
     }
 
-    TaintAnalysisResult(paths, context.newDataflowEdges)
+    val pathList = paths.toList
+    val slices   = TaintSliceBuilder.build(pathList, taintSourceNodes)
+    TaintAnalysisResult(pathList.iterator, context.newDataflowEdges, slices)
   }
 
   /** the nodes needed to run the taint engine for a set of sinks

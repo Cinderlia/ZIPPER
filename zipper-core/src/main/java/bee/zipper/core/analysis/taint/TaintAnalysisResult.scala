@@ -13,5 +13,6 @@ import java.util
   */
 case class TaintAnalysisResult(
   paths: Iterator[TaintPath],
-  newDataflowEdges: util.List[(CfgNode, CfgNode)] = new util.ArrayList[(CfgNode, CfgNode)]
+  newDataflowEdges: util.List[(CfgNode, CfgNode)] = new util.ArrayList[(CfgNode, CfgNode)],
+  slices: List[TaintSlice] = Nil
 ) extends AnalysisResult

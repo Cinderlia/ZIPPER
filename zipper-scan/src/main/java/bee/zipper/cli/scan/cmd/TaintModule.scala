@@ -202,6 +202,12 @@ object TaintCmd {
     jsonStream.flush()
     jsonStream.close()
 
+    // sink-centric slices: one entry per sink, with the union of its sources and statements
+    val slicesFile   = Paths.get(outputDir, "taint-analysis-slices.json").toFile
+    val slicesStream = new PrintStream(new FileOutputStream(slicesFile))
+    try slicesStream.println(renderSlices(taintAnalysisResult.slices))
+    finally slicesStream.close()
+
     if (sarif) {
       val report   = SarifGenerator.reportForTaintPaths("taint-analysis", taintPaths)
       val jsonFile = Paths.get(outputDir, "taint-analysis-result.sarif").toFile
@@ -243,6 +249,13 @@ object TaintResult {
   implicit val clusterEncoder: Encoder[Cluster]             = deriveEncoder
   implicit val summaryEncoder: Encoder[AnalysisSummary]     = deriveEncoder
 
+  implicit val sliceSourceEncoder: Encoder[SliceSource] = deriveEncoder
+  implicit val sliceNodeEncoder: Encoder[SliceNode]     = deriveEncoder
+  implicit val taintSliceEncoder: Encoder[TaintSlice]   = deriveEncoder
+
+  case class SliceSummary(sliceSize: Int, slices: Seq[TaintSlice])
+  implicit val sliceSummaryEncoder: Encoder[SliceSummary] = deriveEncoder
+
   def constructCluster(paths: List[TaintPath], newEdges: Set[(String, String)]): Cluster = {
     import org.apache.commons.codec.digest.DigestUtils
 
@@ -272,6 +285,9 @@ object TaintResult {
   }
 
   def renderSummary(summary: AnalysisSummary): String = Printer.spaces4.print(summary.asJson)
+
+  def renderSlices(slices: List[TaintSlice]): String =
+    Printer.spaces4.print(SliceSummary(slices.size, slices).asJson)
 }
 
 private object TaintPathAnalyzer {
