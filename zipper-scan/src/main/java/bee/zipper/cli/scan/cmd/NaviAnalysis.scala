@@ -5,7 +5,13 @@ import bee.zipper.core.Api
 import bee.zipper.core.analysis.aliasing.DefaultAliasAnalysis
 import bee.zipper.core.analysis.taint.sourcesink.*
 import bee.zipper.core.ir.CpgNodeExtension.*
-import bee.zipper.core.analysis.taint.{DefaultTaintAnalysis, PathChainMerger, TaintPath, TaintSliceBuilder}
+import bee.zipper.core.analysis.taint.{
+  CompactFlowBuilder,
+  DefaultTaintAnalysis,
+  PathChainMerger,
+  TaintPath,
+  TaintSliceBuilder
+}
 import bee.zipper.util.sys.FileSys
 import io.circe.generic.auto.*
 import io.circe.parser.parse
@@ -307,6 +313,11 @@ object NaviAnalysis {
     val slicesStream = new PrintStream(new FileOutputStream(Paths.get(dir, "taint-analysis-slices.json").toFile))
     try slicesStream.println(TaintResult.renderSlices(slices))
     finally slicesStream.close()
+
+    val flows       = CompactFlowBuilder.build(paths, sources.toSet)
+    val flowsStream = new PrintStream(new FileOutputStream(Paths.get(dir, "taint-analysis-flows.json").toFile))
+    try flowsStream.println(TaintResult.renderFlows(flows))
+    finally flowsStream.close()
   }
 
   private def sanitize(name: String): String =
