@@ -98,7 +98,8 @@ class DefaultTaintAnalysis(
     val pathList = paths.toList
     val slices   = TaintSliceBuilder.build(pathList, taintSourceNodes)
     val flows    = CompactFlowBuilder.build(pathList, taintSourceNodes)
-    TaintAnalysisResult(pathList.iterator, context.newDataflowEdges, slices, flows)
+    val graphs   = SinkGraphBuilder.build(pathList, taintSourceNodes)
+    TaintAnalysisResult(pathList.iterator, context.newDataflowEdges, slices, flows, graphs)
   }
 
   /** the nodes needed to run the taint engine for a set of sinks

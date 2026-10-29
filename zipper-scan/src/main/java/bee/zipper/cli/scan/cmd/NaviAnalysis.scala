@@ -9,6 +9,7 @@ import bee.zipper.core.analysis.taint.{
   CompactFlowBuilder,
   DefaultTaintAnalysis,
   PathChainMerger,
+  SinkGraphBuilder,
   TaintPath,
   TaintSliceBuilder
 }
@@ -318,6 +319,11 @@ object NaviAnalysis {
     val flowsStream = new PrintStream(new FileOutputStream(Paths.get(dir, "taint-analysis-flows.json").toFile))
     try flowsStream.println(TaintResult.renderFlows(flows))
     finally flowsStream.close()
+
+    val graphs       = SinkGraphBuilder.build(paths, sources.toSet)
+    val graphsStream = new PrintStream(new FileOutputStream(Paths.get(dir, "taint-analysis-graphs.json").toFile))
+    try graphsStream.println(TaintResult.renderGraphs(graphs))
+    finally graphsStream.close()
   }
 
   private def sanitize(name: String): String =

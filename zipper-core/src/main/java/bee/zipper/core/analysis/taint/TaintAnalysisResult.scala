@@ -15,5 +15,6 @@ case class TaintAnalysisResult(
   paths: Iterator[TaintPath],
   newDataflowEdges: util.List[(CfgNode, CfgNode)] = new util.ArrayList[(CfgNode, CfgNode)],
   slices: List[TaintSlice] = Nil,
-  flows: List[CompactFlow] = Nil
+  flows: List[CompactFlow] = Nil,
+  graphs: List[SinkGraph] = Nil
 ) extends AnalysisResult

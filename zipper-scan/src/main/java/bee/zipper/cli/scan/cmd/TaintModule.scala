@@ -213,6 +213,11 @@ object TaintCmd {
     try flowsStream.println(renderFlows(taintAnalysisResult.flows))
     finally flowsStream.close()
 
+    val graphsFile   = Paths.get(outputDir, "taint-analysis-graphs.json").toFile
+    val graphsStream = new PrintStream(new FileOutputStream(graphsFile))
+    try graphsStream.println(renderGraphs(taintAnalysisResult.graphs))
+    finally graphsStream.close()
+
     if (sarif) {
       val report   = SarifGenerator.reportForTaintPaths("taint-analysis", taintPaths)
       val jsonFile = Paths.get(outputDir, "taint-analysis-result.sarif").toFile
@@ -265,6 +270,12 @@ object TaintResult {
   case class FlowSummary(flowSize: Int, flows: Seq[CompactFlow])
   implicit val flowSummaryEncoder: Encoder[FlowSummary] = deriveEncoder
 
+  implicit val graphNodeEncoder: Encoder[SinkGraphNode] = deriveEncoder
+  implicit val graphEdgeEncoder: Encoder[SinkGraphEdge] = deriveEncoder
+  implicit val sinkGraphEncoder: Encoder[SinkGraph]     = deriveEncoder
+  case class GraphSummary(sinkSize: Int, sinks: Seq[SinkGraph])
+  implicit val graphSummaryEncoder: Encoder[GraphSummary] = deriveEncoder
+
   def constructCluster(paths: List[TaintPath], newEdges: Set[(String, String)]): Cluster = {
     import org.apache.commons.codec.digest.DigestUtils
 
@@ -300,6 +311,9 @@ object TaintResult {
 
   def renderFlows(flows: List[CompactFlow]): String =
     Printer.spaces4.print(FlowSummary(flows.size, flows).asJson)
+
+  def renderGraphs(graphs: List[SinkGraph]): String =
+    Printer.spaces4.print(GraphSummary(graphs.size, graphs).asJson)
 }
 
 private object TaintPathAnalyzer {
