@@ -30,7 +30,8 @@ class DefaultTaintAnalysis(
   enableKeywordMatching: Boolean = false,
   aliasFinder: Option[AliasFinder] = None,
   enableControlStructure: Boolean = false,
-  enableImplicitTaint: Boolean = false
+  enableImplicitTaint: Boolean = false,
+  includeUntaintedSinks: Boolean = true
 ) extends TaintAnalysis {
   private val language   = cpg.metaData.language.head
   private val pathFilter = new PathFilter(cpg, vsa, language, exploitMode, enableCustomSanitizer, enableKeywordMatching)
@@ -80,7 +81,7 @@ class DefaultTaintAnalysis(
         if (enableControlStructure) enhancedPaths else enhancedPaths.filter(path => pathFilter.isValid(path))
       // step6. in control-structure mode, also keep sinks that receive no taint: their path is the sink itself
       val collectedPaths: List[TaintPath] =
-        if (enableControlStructure) {
+        if (enableControlStructure && includeUntaintedSinks) {
           enhancedPaths ++ untaintedSinkPaths(kind, extractedSinks.sinks, enhancedPaths)
         } else enhancedPaths
       // step7. merge sinks that share a straight-line CFG segment, reporting their paths together
@@ -193,7 +194,8 @@ object DefaultTaintAnalysis {
     enableIndirectSuperGlobalFetching: Boolean = true,
     aliasFinder: Option[AliasFinder] = None,
     enableControlStructure: Boolean = false,
-    enableImplicitTaint: Boolean = false
+    enableImplicitTaint: Boolean = false,
+    includeUntaintedSinks: Boolean = true
   ): DefaultTaintAnalysis = {
     val sources = {
       val searcher =
@@ -217,7 +219,8 @@ object DefaultTaintAnalysis {
       enableKeywordMatching,
       aliasFinder,
       enableControlStructure,
-      enableImplicitTaint
+      enableImplicitTaint,
+      includeUntaintedSinks
     )
   }
 }

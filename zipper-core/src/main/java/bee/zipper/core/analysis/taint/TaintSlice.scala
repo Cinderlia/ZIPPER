@@ -103,6 +103,7 @@ object TaintSliceBuilder {
   def build(paths: List[TaintPath], sources: Set[CfgNode]): List[TaintSlice] = {
     val sourceIds = sources.map(_.id())
     paths
+      .filter(_.path.size > 1)
       .groupBy(path => path.sink.id())
       .values
       .toList
@@ -171,6 +172,7 @@ object CompactFlowBuilder {
   def build(paths: List[TaintPath], sources: Set[CfgNode]): List[CompactFlow] = {
     val sourceIds = sources.map(_.id())
     paths
+      .filter(_.path.size > 1)
       .groupBy(_.sink.id())
       .values
       .toList
@@ -241,6 +243,7 @@ object SinkGraphBuilder {
   def build(paths: List[TaintPath], sources: Set[CfgNode]): List[SinkGraph] = {
     val sourceIds = sources.map(_.id())
     paths
+      .filter(_.path.size > 1)
       .groupBy(_.sink.id())
       .values
       .toList

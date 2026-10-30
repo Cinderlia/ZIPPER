@@ -186,7 +186,7 @@ object NaviAnalysis {
               s"navi[${chain.name}] segment ${index + 1}: empty sources or sinks (sources=${sources.size}, sinks=$sinkCount)"
             )
             List.empty[TaintPath]
-          } else analyzeSegment(cpg, sources, sinks, api, c)
+          } else analyzeSegment(cpg, sources, sinks, api, c, includeUntaintedSinks = index < chain.segments.size - 1)
         val label = segment.name.getOrElse(s"segment-${index + 1}")
         writeReport(paths, chainDir.resolve(s"${index + 1}-$label").toString, sources)
         logger.info(s"navi[${chain.name}] ${segment.source} -> ${segment.sink}: ${paths.size} paths")
@@ -195,6 +195,21 @@ object NaviAnalysis {
       if (chain.join.contains(true) && perSegment.size > 1) {
         val bridgeWp = chain.bridge.exists(value => value.toLowerCase.contains("wp"))
         val joined   = perSegment.map(_._1).reduceLeft((left, right) => joinPaths(left, right, bridgeWp))
+        // If an intermediate sink B is not reached by the previous segment (it is an empty sink there), a B -> C
+        // chain from the next segment still belongs to the navigation and is added on its own. Empty sinks C (paths
+        // that consist of the sink only) are never added.
+        val extra =
+          if (perSegment.size == 2) {
+            val first     = perSegment.head._1
+            val second    = perSegment(1)._1
+            val realSinks = first.filter(_.path.size > 1).map(_.sink.id()).toSet
+            second.filter(path => path.path.size > 1 && !realSinks.contains(path.path.head.id()))
+          } else Nil
+        val joinedAll = (joined ++ extra)
+          .groupBy(path => (path.path.head.id(), path.path.last.id(), path.path.size))
+          .values
+          .map(_.head)
+          .toList
         val joinedSources = perSegment
           .flatMap(_._2)
           .distinctBy(_.id())
@@ -202,8 +217,10 @@ object NaviAnalysis {
             case call: Call => wpObjectField(call).nonEmpty
             case _          => false
           }
-        writeReport(joined, chainDir.resolve("joined").toString, joinedSources)
-        logger.info(s"navi[${chain.name}] joined: ${joined.size} paths")
+        logger.info(
+          s"navi[${chain.name}] joined: ${joinedAll.size} paths (${joined.size} linked, ${extra.size} from empty intermediate sinks)"
+        )
+        writeReport(joinedAll, chainDir.resolve("joined").toString, joinedSources)
       }
     }
   }
@@ -213,7 +230,8 @@ object NaviAnalysis {
     sources: List[CfgNode],
     sinks: Map[String, List[TaintSink]],
     api: Api,
-    c: EngineConfig
+    c: EngineConfig,
+    includeUntaintedSinks: Boolean
   ): List[TaintPath] = {
     val aliasFinder =
       if (c.enableOnDemandAliasAnalysis && !c.enableObjectDataDependency)
@@ -233,7 +251,8 @@ object NaviAnalysis {
       enableKeywordMatching = c.enableSanitizerKeywordMatching,
       aliasFinder = aliasFinder,
       enableControlStructure = c.enableControlStructure,
-      enableImplicitTaint = c.enableImplicitTaint
+      enableImplicitTaint = c.enableImplicitTaint,
+      includeUntaintedSinks = includeUntaintedSinks
     )
     val result = analysis.analyze().paths.toList
     logger.info(s"navi segment: sources=${sources.size}, sinkKinds=${sinks
@@ -253,7 +272,7 @@ object NaviAnalysis {
     val joined = left.flatMap { prefix =>
       val last  = prefix.path.last
       val tails = byHead.getOrElse(last.id(), Nil) ++ byHead.getOrElse(nodeKey(last), Nil)
-      tails.map(tail => TaintPath(prefix.kind, order = true, prefix.path ++ tail.path.drop(1)))
+      tails.map(tail => TaintPath(tail.kind, order = true, prefix.path ++ tail.path.drop(1)))
     }
 
     // WordPress bridge: a database row is copied into an object field dynamically (`$this->$key = $value`), so the
@@ -296,7 +315,7 @@ object NaviAnalysis {
       .groupBy(_.path.head.id())
       .values
       .map(_.minBy(_.path.size))
-      .map(prefix => TaintPath(prefix.kind, order = true, prefix.path ++ suffix.path))
+      .map(prefix => TaintPath(suffix.kind, order = true, prefix.path ++ suffix.path))
       .toList
 
   private def nodeKey(node: CfgNode): (String, Int, String) =
