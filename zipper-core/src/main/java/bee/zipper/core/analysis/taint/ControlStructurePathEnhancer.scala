@@ -121,31 +121,12 @@ final class ControlStructurePathEnhancer {
     taintSources: Set[CfgNode],
     segmentNodes: List[CfgNode]
   ): Boolean = {
+    // def-use only: the condition must be reached from a taint source through REACHING_DEF edges. The previous
+    // name-based propagation of "tainted variables" over the segment is intentionally gone: when a variable is
+    // reused by another block ($stmt / $rows in a second query), the name says nothing about which definition the
+    // condition sees.
     val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
-    if (traceDependency(conditionNodes, taintSources, forward = false).matched.nonEmpty) return true
-
-    val conditionVariables = control.condition.ast.collectAll[Identifier].map(_.code).toSet
-    val assignments        = segmentNodes.collect { case call: Call if call.isGenericAssignment => call }
-    val taintedVariables   = mutable.Set.empty[String]
-    var changed            = true
-
-    while (changed) {
-      changed = false
-      assignments.foreach { assignment =>
-        val targetName = assignment.argumentOption(1).map(_.code)
-        val value      = assignment.argumentOption(2)
-        val valueIsTainted = value.exists { rhs =>
-          taintSources.exists(source => source == rhs || rhs.ast.contains(source)) ||
-          traceDependency(List(rhs), taintSources, forward = false).matched.nonEmpty ||
-          rhs.ast.collectAll[Identifier].exists(identifier => taintedVariables.contains(identifier.code))
-        }
-        targetName.foreach { name =>
-          if (valueIsTainted && taintedVariables.add(name)) changed = true
-        }
-      }
-    }
-
-    conditionVariables.exists(taintedVariables.contains)
+    traceDependency(conditionNodes, taintSources, forward = false).matched.nonEmpty
   }
 
   private def conditionDependsOnPath(control: ControlStructure, pathNodes: Set[CfgNode]): Boolean = {

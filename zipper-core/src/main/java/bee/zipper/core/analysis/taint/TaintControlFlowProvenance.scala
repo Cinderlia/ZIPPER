@@ -97,7 +97,6 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   private def findDataPath(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = {
     val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
     findReachingDefPath(source, conditionNodes.toSet)
-      .orElse(findAssignmentPath(source, control, conditionNodes))
   }
 
   private def findReachingDefPath(source: CfgNode, targets: Set[CfgNode]): Option[List[CfgNode]] = {
