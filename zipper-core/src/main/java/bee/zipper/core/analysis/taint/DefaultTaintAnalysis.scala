@@ -96,11 +96,44 @@ class DefaultTaintAnalysis(
       if (enableReachAnalysis) implicitPaths.filter(path => pathFilter.isReachable(path)) else implicitPaths
     }
 
-    val pathList = paths.toList
+    // Control-flow enhancement may pull statements from later, unrelated blocks when a variable is reused
+    // (`$stmt`/`$rows` reused by a second query). Keep only nodes that can precede the sink in the CFG; a path whose
+    // source cannot precede the sink in the same method is dropped.
+    val prunedPaths =
+      if (!enableControlStructure) paths
+      else
+        paths.flatMap { path =>
+          val sink = path.sink
+          if (path.path.head.method.id() == sink.method.id() && !cfgReaches(path.path.head, sink)) None
+          else Some(path.copy(path = path.path.filter(node => node.id() == sink.id() || cfgReaches(node, sink))))
+        }
+
+    val pathList = prunedPaths.toList
     val slices   = TaintSliceBuilder.build(pathList, taintSourceNodes)
     val flows    = CompactFlowBuilder.build(pathList, taintSourceNodes)
     val graphs   = SinkGraphBuilder.build(pathList, taintSourceNodes)
     TaintAnalysisResult(pathList.iterator, context.newDataflowEdges, slices, flows, graphs)
+  }
+
+  /** True when `from` can reach `to` through CFG successors inside the same method. Nodes in other methods (method
+    * parameters and returns of the interprocedural path) are kept as is.
+    */
+  private def cfgReaches(from: CfgNode, to: CfgNode): Boolean = {
+    if (from.id() == to.id()) return true
+    if (Option(from.method).exists(_.id() != to.method.id())) return true
+    val visited = scala.collection.mutable.Set.empty[Long]
+    val queue   = scala.collection.mutable.Queue.empty[CfgNode]
+    queue.enqueue(from)
+    var budget = 4000
+    while (queue.nonEmpty && budget > 0) {
+      budget -= 1
+      val node = queue.dequeue()
+      if (visited.add(node.id())) {
+        if (node.id() == to.id()) return true
+        node.cfgNext.foreach(queue.enqueue)
+      }
+    }
+    false
   }
 
   /** the nodes needed to run the taint engine for a set of sinks
