@@ -3,15 +3,13 @@ package bee.zipper.core.analysis.taint
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 
-/** A user input that flows into (or controls) a sink. `param` is extracted from the source expression when possible,
-  * e.g. `get_query_var("p")` / `$_GET["page_id"]` -> `p` / `page_id`.
-  */
+/** A user input that flows into (or controls) a sink. */
 case class SliceSource(file: String, line: Int, code: String, param: Option[String])
 
 /** A statement of the slice around the sink. */
 case class SliceNode(file: String, line: Int, code: String)
 
-/** All inputs and statements that are relevant for one sink: the union of every taint path that ends at it. */
+/** All inputs and statements that are relevant for one sink. */
 case class TaintSlice(
   kind: String,
   sinkFile: String,
@@ -23,9 +21,24 @@ case class TaintSlice(
   pathCount: Int
 )
 
-object TaintSliceBuilder {
+/** Compact, LLM-oriented view of one sink reached from one source. */
+case class CompactFlow(kind: String, sink: String, source: String, param: Option[String], steps: List[String])
 
-  private val paramPatterns = List(
+/** Per-sink graph for symbolic execution: nodes and typed edges, one entry per source line. */
+case class SinkGraphNode(id: String, at: String, code: String, kind: String)
+case class SinkGraphEdge(from: String, to: String, kind: String)
+case class SinkGraph(
+  kind: String,
+  sink: String,
+  params: List[String],
+  sources: List[String],
+  guards: List[String],
+  nodes: List[SinkGraphNode],
+  edges: List[SinkGraphEdge]
+)
+
+private[taint] object TaintSliceSupport {
+  val paramPatterns = List(
     """get_query_var\(\s*["']([^"']+)["']""".r,
     """\$_GET\[\s*["']([^"']+)["']""".r,
     """\$_POST\[\s*["']([^"']+)["']""".r,
@@ -33,25 +46,70 @@ object TaintSliceBuilder {
     """\$_COOKIE\[\s*["']([^"']+)["']""".r
   )
 
-  private def param(code: String): Option[String] =
+  def param(code: String): Option[String] =
     paramPatterns.view.flatMap(pattern => pattern.findFirstMatchIn(code)).headOption.map(_.group(1))
 
-  private def fileOf(node: CfgNode): String =
+  def fileOf(node: CfgNode): String =
     node.file.headOption.map(_.name.replace(java.io.File.separator, "/")).getOrElse("")
-  private def lineOf(node: CfgNode): Int = node.lineNumber.getOrElse(-1)
 
-  /** Groups the paths by sink and merges them into one slice per sink: union of nodes and union of taint sources. */
+  def lineOf(node: CfgNode): Int = node.lineNumber.getOrElse(-1)
+
+  def atOf(node: CfgNode): String = s"${fileOf(node)}:${lineOf(node)}"
+
+  /** One node per source line: different fragments of the same line collapse into the most representative node. */
+  def perLine(nodes: List[CfgNode], sourceIds: Set[Long], sinkId: Long): List[CfgNode] =
+    nodes
+      .groupBy(node => (fileOf(node), lineOf(node)))
+      .values
+      .map(candidates => candidates.minBy(node => (roleRank(node, sourceIds, sinkId), -node.code.length)))
+      .toList
+      .sortBy(node => (fileOf(node), lineOf(node)))
+
+  def roleRank(node: CfgNode, sourceIds: Set[Long], sinkId: Long): Int =
+    if (node.id() == sinkId) 0
+    else if (sourceIds.contains(node.id())) 1
+    else
+      node match {
+        case _: ControlStructure                                => 2
+        case _: MethodParameterIn                               => 3
+        case call: Call if !call.name.startsWith("<operator>.") => 4
+        case call: Call if call.name == "<operator>.assignment" => 5
+        case _                                                  => 6
+      }
+
+  val contentFields = Set(
+    "post_title",
+    "post_content",
+    "post_excerpt",
+    "comment_content",
+    "comment_author",
+    "comment_author_email",
+    "comment_author_url"
+  )
+
+  def isContentField(call: Call): Boolean =
+    call.name == "<operator>.fieldAccess" && call.argumentOption(2).exists(arg => contentFields.contains(arg.code))
+
+  def noise(code: String): Boolean = {
+    val text = code.trim
+    text.isEmpty || text == "RET" || text.startsWith("<unknown>") || text.startsWith("tmp")
+  }
+}
+
+object TaintSliceBuilder {
+  import TaintSliceSupport.*
+
+  /** Groups the paths by sink and merges them into one slice per sink (one entry per source line). */
   def build(paths: List[TaintPath], sources: Set[CfgNode]): List[TaintSlice] = {
+    val sourceIds = sources.map(_.id())
     paths
       .groupBy(path => path.sink.id())
       .values
       .toList
       .map { group =>
-        val sink  = group.head.sink
-        val nodes = group.flatMap(_.path).distinctBy(_.id())
-        val srcNodes = nodes
-          .filter(node => sources.exists(_.id() == node.id()))
-          .distinctBy(node => (fileOf(node), lineOf(node), node.code))
+        val sink     = group.head.sink
+        val nodes    = perLine(group.flatMap(_.path), sourceIds, sink.id())
+        val srcNodes = nodes.filter(node => sourceIds.contains(node.id()))
         TaintSlice(
           kind = group.head.kind,
           sinkFile = fileOf(sink),
@@ -67,55 +125,16 @@ object TaintSliceBuilder {
   }
 }
 
-/** Compact, LLM-oriented view of one sink reached from one source. The steps keep only significant nodes so the flow
-  * reads like a story with an explicit source and sink.
-  */
-case class CompactFlow(kind: String, sink: String, source: String, param: Option[String], steps: List[String])
-
 object CompactFlowBuilder {
-
-  private val paramPatterns = List(
-    """get_query_var\(\s*["']([^"']+)["']""".r,
-    """\$_GET\[\s*["']([^"']+)["']""".r,
-    """\$_POST\[\s*["']([^"']+)["']""".r,
-    """\$_REQUEST\[\s*["']([^"']+)["']""".r,
-    """\$_COOKIE\[\s*["']([^"']+)["']""".r
-  )
-
-  private def param(code: String): Option[String] =
-    paramPatterns.view.flatMap(pattern => pattern.findFirstMatchIn(code)).headOption.map(_.group(1))
-
-  private def fileOf(node: CfgNode): String =
-    node.file.headOption.map(_.name.replace(java.io.File.separator, "/")).getOrElse("")
-  private def lineOf(node: CfgNode): Int = node.lineNumber.getOrElse(-1)
-
-  private def noise(code: String): Boolean = {
-    val text = code.trim
-    text.isEmpty || text == "RET" || text.startsWith("<unknown>") || text.startsWith("tmp") ||
-    text.matches("""^"[^"]*"$""") || text.matches("""^'[^']*'$""") || text.matches("""^\d+(\.\d+)?$""")
-  }
-
-  private val contentFields = Set(
-    "post_title",
-    "post_content",
-    "post_excerpt",
-    "comment_content",
-    "comment_author",
-    "comment_author_email",
-    "comment_author_url"
-  )
+  import TaintSliceSupport.*
 
   private def significant(node: CfgNode, sourceIds: Set[Long], sinkId: Long): Boolean =
     node.id() == sinkId || sourceIds.contains(node.id()) || (node match {
       case _: ControlStructure  => true
       case _: MethodParameterIn => true
       case call: Call =>
-        val contentField =
-          call.name == "<operator>.fieldAccess" && call
-            .argumentOption(2)
-            .exists(arg => contentFields.contains(arg.code))
         !noise(call.code) && (
-          contentField ||
+          isContentField(call) ||
             !call.name.startsWith("<operator>.") ||
             call.name == "<operator>.assignment" ||
             call.name.contains("concat")
@@ -124,12 +143,12 @@ object CompactFlowBuilder {
     })
 
   private def stepsOf(path: TaintPath, sourceIds: Set[Long]): List[String] = {
-    val seen = scala.collection.mutable.Set.empty[(String, Int, String)]
+    val seen = scala.collection.mutable.Set.empty[Int]
     val out  = scala.collection.mutable.ListBuffer.empty[String]
     path.path.foreach { node =>
       if (significant(node, sourceIds, path.sink.id()) && !noise(node.code)) {
-        val key = (fileOf(node), lineOf(node), node.code)
-        if (seen.add(key)) {
+        val line = lineOf(node)
+        if (seen.add(line)) {
           val role =
             if (sourceIds.contains(node.id())) "   <- source"
             else if (node.id() == path.sink.id()) "   <- sink"
@@ -137,10 +156,9 @@ object CompactFlowBuilder {
               node match {
                 case _: ControlStructure => "   (guard)"
                 case _: MethodParameterIn =>
-                  val method = Option(node.method).map(_.name).getOrElse("?")
-                  s"   (param of $method)"
-                case call: Call if call.name == "<operator>.fieldAccess" => "   (field read)"
-                case _                                                   => ""
+                  s"   (param of ${Option(node.method).map(_.name).getOrElse("?")})"
+                case call: Call if isContentField(call) => "   (field read)"
+                case _                                  => ""
               }
           out += s"${fileOf(node)}:${lineOf(node)}  ${node.code}$role"
         }
@@ -149,75 +167,33 @@ object CompactFlowBuilder {
     out.toList
   }
 
-  /** One flow per (sink, source): every source keeps its own dataflow, distinct routes are all preserved. */
+  /** One flow per (sink, source): every input keeps its own dataflow, alternative routes are collapsed. */
   def build(paths: List[TaintPath], sources: Set[CfgNode]): List[CompactFlow] = {
     val sourceIds = sources.map(_.id())
-    val bySink    = paths.groupBy(_.sink.id())
-
-    bySink.values.toList
+    paths
+      .groupBy(_.sink.id())
+      .values
+      .toList
       .flatMap { group =>
         val sink = group.head.sink
         val flows = group.map { path =>
           val source = path.path.head
           CompactFlow(
             kind = path.kind,
-            sink = s"${fileOf(sink)}:${lineOf(sink)}  ${sink.code}",
-            source = s"${fileOf(source)}:${lineOf(source)}  ${source.code}",
+            sink = s"${atOf(sink)}  ${sink.code}",
+            source = s"${atOf(source)}  ${source.code}",
             param = param(source.code),
             steps = stepsOf(path, sourceIds)
           )
         }
-        // one representative flow per (sink, source): every input keeps its own dataflow, alternative routes of the
-        // same input are collapsed into the most complete one
-        flows
-          .groupBy(flow => (flow.source, flow.param))
-          .values
-          .map(_.maxBy(_.steps.size))
-          .toList
+        flows.groupBy(flow => (flow.source, flow.param)).values.map(_.maxBy(_.steps.size)).toList
       }
       .sortBy(flow => (flow.sink, flow.source))
   }
 }
 
-/** Per-sink graph for symbolic execution: every sink owns its nodes and typed edges (data, call argument, return, field
-  * read, control) together with its sources and guards.
-  */
-case class SinkGraphNode(id: String, at: String, code: String, kind: String)
-case class SinkGraphEdge(from: String, to: String, kind: String)
-case class SinkGraph(
-  kind: String,
-  sink: String,
-  params: List[String],
-  sources: List[String],
-  guards: List[String],
-  nodes: List[SinkGraphNode],
-  edges: List[SinkGraphEdge]
-)
-
 object SinkGraphBuilder {
-
-  private def fileOf(node: CfgNode): String =
-    node.file.headOption.map(_.name.replace(java.io.File.separator, "/")).getOrElse("")
-  private def lineOf(node: CfgNode): Int  = node.lineNumber.getOrElse(-1)
-  private def atOf(node: CfgNode): String = s"${fileOf(node)}:${lineOf(node)}"
-
-  private val contentFields = Set(
-    "post_title",
-    "post_content",
-    "post_excerpt",
-    "comment_content",
-    "comment_author",
-    "comment_author_email",
-    "comment_author_url"
-  )
-
-  private def isContentField(call: Call): Boolean =
-    call.name == "<operator>.fieldAccess" && call.argumentOption(2).exists(arg => contentFields.contains(arg.code))
-
-  private def noise(code: String): Boolean = {
-    val text = code.trim
-    text.isEmpty || text == "RET" || text.startsWith("<unknown>") || text.startsWith("tmp")
-  }
+  import TaintSliceSupport.*
 
   private def nodeKind(node: CfgNode, sourceIds: Set[Long], sinkId: Long): String =
     if (node.id() == sinkId) "sink"
@@ -260,27 +236,22 @@ object SinkGraphBuilder {
     else "data"
   }
 
+  /** One graph per sink; nodes are deduplicated by source line, edges from every execution are kept and deduplicated.
+    */
   def build(paths: List[TaintPath], sources: Set[CfgNode]): List[SinkGraph] = {
     val sourceIds = sources.map(_.id())
-    val paramPatterns = List(
-      """get_query_var\(\s*["']([^"']+)["']""".r,
-      """\$_GET\[\s*["']([^"']+)["']""".r,
-      """\$_POST\[\s*["']([^"']+)["']""".r,
-      """\$_REQUEST\[\s*["']([^"']+)["']""".r
-    )
-    def paramOf(code: String): Option[String] =
-      paramPatterns.view.flatMap(pattern => pattern.findFirstMatchIn(code)).headOption.map(_.group(1))
-
     paths
       .groupBy(_.sink.id())
       .values
       .toList
       .map { group =>
         val sink  = group.head.sink
-        val ids   = scala.collection.mutable.Map.empty[(String, Int, String), String]
-        val order = scala.collection.mutable.ListBuffer.empty[(String, Int, String)]
-        val byKey = scala.collection.mutable.Map.empty[(String, Int, String), CfgNode]
-        def keyOf(node: CfgNode): (String, Int, String) = (fileOf(node), lineOf(node), node.code)
+        val ids   = scala.collection.mutable.Map.empty[(String, Int), String]
+        val order = scala.collection.mutable.ListBuffer.empty[(String, Int)]
+        val byKey = scala.collection.mutable.Map.empty[(String, Int), CfgNode]
+
+        def keyOf(node: CfgNode): (String, Int) = (fileOf(node), lineOf(node))
+
         def idOf(node: CfgNode): String = {
           val key = keyOf(node)
           ids.getOrElseUpdate(
@@ -292,12 +263,27 @@ object SinkGraphBuilder {
           )
         }
 
+        def representative(node: CfgNode): Unit = {
+          val key = keyOf(node)
+          byKey.get(key) match {
+            case Some(existing) if roleRank(node, sourceIds, sink.id()) < roleRank(existing, sourceIds, sink.id()) =>
+              byKey.update(key, node)
+            case Some(existing)
+                if roleRank(node, sourceIds, sink.id()) == roleRank(existing, sourceIds, sink.id()) &&
+                  node.code.length > existing.code.length =>
+              byKey.update(key, node)
+            case None => byKey.update(key, node)
+            case _    =>
+          }
+        }
+
         val edges = scala.collection.mutable.LinkedHashSet.empty[SinkGraphEdge]
         group.foreach { path =>
           val seenIds = scala.collection.mutable.Set.empty[Long]
           val significantNodes = path.path.zipWithIndex.filter { case (node, _) =>
             significant(node, sourceIds, sink.id()) && seenIds.add(node.id())
           }
+          significantNodes.foreach { case (node, _) => representative(node) }
           significantNodes.sliding(2).foreach {
             case List((a, ia), (b, ib)) =>
               val segment = if (ib > ia) path.path.slice(ia + 1, ib + 1) else List(b)
@@ -309,13 +295,13 @@ object SinkGraphBuilder {
         }
 
         val nodes = order.toList.map { key =>
-          val (file, line, code) = key
-          val node               = byKey(key)
-          SinkGraphNode(ids(key), s"$file:$line", code, nodeKind(node, sourceIds, sink.id()))
+          val (file, line) = key
+          val node         = byKey(key)
+          SinkGraphNode(ids(key), s"$file:$line", node.code, nodeKind(node, sourceIds, sink.id()))
         }
 
         val sourceNodes = nodes.filter(_.kind == "source")
-        val params      = sourceNodes.flatMap(node => paramOf(node.code)).distinct.sorted
+        val params      = sourceNodes.flatMap(node => param(node.code)).distinct.sorted
         SinkGraph(
           kind = group.head.kind,
           sink = s"${atOf(sink)}  ${sink.code}",
@@ -328,5 +314,4 @@ object SinkGraphBuilder {
       }
       .sortBy(graph => graph.sink)
   }
-
 }
