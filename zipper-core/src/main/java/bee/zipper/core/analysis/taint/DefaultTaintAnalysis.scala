@@ -41,6 +41,7 @@ class DefaultTaintAnalysis(
   private val emptySinkTracer       = new EmptySinkControlFlowTracer(taintSourceNodes, taintControlFlowProvenance)
   private val sinkGroupMerger       = new SinkGroupMerger
   private val implicitTaintEnhancer = new ImplicitTaintEnhancer(emptySinkTracer)
+  private val logger                = org.slf4j.LoggerFactory.getLogger(this.getClass)
 
   override def analyze(): TaintAnalysisResult = {
     implicit val context: EngineContext = {
@@ -52,20 +53,53 @@ class DefaultTaintAnalysis(
       )
     }
 
+    // heartbeat so a long engine run is distinguishable from a hang
+    val running   = new java.util.concurrent.atomic.AtomicBoolean(true)
+    val startTime = System.currentTimeMillis()
+    val heartbeat = new Thread(
+      () => {
+        while (running.get()) {
+          try Thread.sleep(30000)
+          catch { case _: InterruptedException => }
+          if (running.get())
+            logger.info(s"[taint] heartbeat elapsed=${(System.currentTimeMillis() - startTime) / 1000}s")
+        }
+      },
+      "taint-heartbeat"
+    )
+    heartbeat.setDaemon(true)
+    heartbeat.start()
+
     // iterate over each vulnerability kind and its associated sinks to compute taint paths.
     val paths = kindToSinks.iterator.flatMap { case (kind, taintSinks) =>
       val extractedSinks = extractSinks(taintSinks)
-      // step1. joern taint engine entrypoint
-      val flows =
-        extractedSinks.probes
-          .reachableByFlows(sources)
-          .map(path =>
-            refactorPath(path, extractedSinks.argumentToCall)
-          ) // refactor paths by appending real sink nodes if needed
+      logger.info(
+        s"[taint] kind=$kind sinks=${taintSinks.size} probes=${extractedSinks.probes.size} sources=${sources.size}"
+      )
+      // step1. joern taint engine entrypoint. Probes are processed in chunks so the log shows progress instead of
+      // staying silent while the dataflow engine expands a large number of tasks.
+      val chunkSize = Integer.getInteger("zipper.taint.progress.chunk", 8).intValue()
+      val flowStart = System.currentTimeMillis()
+      val flows = extractedSinks.probes
+        .grouped(chunkSize)
+        .flatMap { chunk =>
+          val chunkStart = System.currentTimeMillis()
+          val found = chunk
+            .reachableByFlows(sources)
+            .map(path => refactorPath(path, extractedSinks.argumentToCall))
+            .toList // refactor paths by appending real sink nodes if needed
+          logger.info(
+            s"[taint] kind=$kind chunk=${chunk.size} flows=${found.size} " +
+              s"elapsed=${System.currentTimeMillis() - chunkStart}ms total=${System.currentTimeMillis() - flowStart}ms"
+          )
+          found
+        }
+        .toList
       // step2. remove duplicate flows if exploit mode is disabled
       val deduplicated = if (!exploitMode && enableDeduplicateFlow) DuplicateFlowProcessor.deduplicate(flows) else flows
       // step3. transform joern `Path` into `TaintPath`
-      val taintPaths = deduplicated.map(path => TaintPath(kind, true, extractCfgNodes(path)))
+      val taintPaths = deduplicated.map(path => TaintPath(kind, true, extractCfgNodes(path))).toList
+      logger.info(s"[taint] kind=$kind taintPaths=${taintPaths.size}")
       // step4. enhance taint paths with the control structures that guard or depend on them
       val enhancedPaths = taintPaths.map { path =>
         if (enableControlStructure) {
@@ -73,6 +107,7 @@ class DefaultTaintAnalysis(
           taintControlFlowProvenance.enhance(selectedControlPath)
         } else path
       }.toList
+      logger.info(s"[taint] kind=$kind enhanced=${enhancedPaths.size}")
       // step5. drop sanitized/invalid taint paths. In control-structure mode the default path filter is
       //        bypassed on purpose: the appended control-flow slices contain guards such as `$x != ""`,
       //        whose comparison calls are configured as type sanitizers and would reject paths that are
@@ -109,9 +144,11 @@ class DefaultTaintAnalysis(
         }
 
     val pathList = prunedPaths.toList
-    val slices   = TaintSliceBuilder.build(pathList, taintSourceNodes)
-    val flows    = CompactFlowBuilder.build(pathList, taintSourceNodes)
-    val graphs   = SinkGraphBuilder.build(pathList, taintSourceNodes)
+    running.set(false)
+    logger.info(s"[taint] analysis finished elapsed=${(System.currentTimeMillis() - startTime) / 1000}s")
+    val slices = TaintSliceBuilder.build(pathList, taintSourceNodes)
+    val flows  = CompactFlowBuilder.build(pathList, taintSourceNodes)
+    val graphs = SinkGraphBuilder.build(pathList, taintSourceNodes)
     TaintAnalysisResult(pathList.iterator, context.newDataflowEdges, slices, flows, graphs)
   }
 
