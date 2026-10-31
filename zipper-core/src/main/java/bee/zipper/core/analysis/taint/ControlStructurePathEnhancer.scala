@@ -10,17 +10,17 @@ import scala.collection.mutable
 /** Adds control structures that affect a taint path or depend on its tainted values. */
 final class ControlStructurePathEnhancer {
   private val logger = org.slf4j.LoggerFactory.getLogger(this.getClass)
-  def enhance(path: TaintPath, taintSources: Set[CfgNode]): TaintPath = {
+  def enhance(path: TaintPath, provenance: TaintControlFlowProvenance): TaintPath = {
     if (path.path.size < 2) return path
 
-    val taintNodes    = path.path.toSet
-    val insertions    = mutable.Map.empty[Int, mutable.LinkedHashSet[CfgNode]]
-    val insertedNodes = mutable.Set.empty[CfgNode]
+    val taintNodes = path.path.toSet
+    // one reverse reachability pass over REACHING_DEF instead of a BFS per segment node
+    val taintReachable = reachableFromTaint(taintNodes)
+    val insertions     = mutable.Map.empty[Int, mutable.LinkedHashSet[CfgNode]]
+    val insertedNodes  = mutable.Set.empty[CfgNode]
 
     var segmentStart = 0
-    val deadline =
-      System.currentTimeMillis() + Integer.getInteger("zipper.controlflow.enhance.budgetMs", 120000).longValue()
-    while (segmentStart < path.path.size && System.currentTimeMillis() < deadline) {
+    while (segmentStart < path.path.size) {
       val method     = path.path(segmentStart).method
       var segmentEnd = segmentStart
       while (segmentEnd + 1 < path.path.size && path.path(segmentEnd + 1).method == method) {
@@ -33,17 +33,17 @@ final class ControlStructurePathEnhancer {
         val relevantControls = segment.controls.filter { control =>
           val branchPathNodes = controlsPathNodes(control, segmentPathNodes)
           val branchDependentNodes = segment.nodes.filter { candidate =>
-            controlsBranchNode(control, candidate) && dependsOnPath(candidate, taintNodes)
+            controlsBranchNode(control, candidate) && taintReachable.contains(candidate.id())
           }
-          val conditionIsTainted = conditionDependsOnPath(control, segmentPathNodes) ||
-            conditionDependsOnSources(control, taintSources, segment.nodes)
+          val conditionIsTainted = provenance.conditionDependsOnPath(control, segmentPathNodes.map(_.id()).toSet) ||
+            provenance.conditionDependsOnSources(control)
           conditionIsTainted && (branchPathNodes.nonEmpty || branchDependentNodes.nonEmpty)
         }
         val conditionNodes   = relevantControls.flatMap(_.condition.ast.collectAll[CfgNode]).distinct
         val conditionNodeSet = conditionNodes.toSet
         val controlNodeSet   = relevantControls.toSet
         val dependentBodyNodes = segment.nodes.filter { candidate =>
-          relevantControls.exists(controlsBranchNode(_, candidate)) && dependsOnPath(candidate, taintNodes)
+          relevantControls.exists(controlsBranchNode(_, candidate)) && taintReachable.contains(candidate.id())
         }
         val dependentStatements = dependentBodyNodes.flatMap {
           case call: Call if call.isGenericAssignment => Some(call)
@@ -62,8 +62,6 @@ final class ControlStructurePathEnhancer {
       segmentStart = segmentEnd + 1
     }
 
-    if (System.currentTimeMillis() >= deadline)
-      logger.warn(s"[controlflow] enhancement budget exhausted for path with ${path.path.size} nodes")
     val result = mutable.ListBuffer.empty[CfgNode]
     path.path.zipWithIndex.foreach { case (node, index) =>
       result += node
@@ -123,65 +121,27 @@ final class ControlStructurePathEnhancer {
     pathNodes.toList.filter(node => control.whenTrue.ast.contains(node) || control.whenFalse.ast.contains(node))
   }
 
-  private def conditionDependsOnSources(
-    control: ControlStructure,
-    taintSources: Set[CfgNode],
-    segmentNodes: List[CfgNode]
-  ): Boolean = {
-    // def-use only: the condition must be reached from a taint source through REACHING_DEF edges. The previous
-    // name-based propagation of "tainted variables" over the segment is intentionally gone: when a variable is
-    // reused by another block ($stmt / $rows in a second query), the name says nothing about which definition the
-    // condition sees.
-    val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
-    traceDependency(conditionNodes, taintSources, forward = false).matched.nonEmpty
+  private def controlsBranchNode(control: ControlStructure, node: CfgNode): Boolean = {
+    control.whenTrue.ast.contains(node) || control.whenFalse.ast.contains(node)
   }
 
-  private def conditionDependsOnPath(control: ControlStructure, pathNodes: Set[CfgNode]): Boolean = {
-    val worklist = mutable.Queue.empty[CfgNode]
-    val visited  = mutable.Set.empty[CfgNode]
-    control.condition.ast.collectAll[CfgNode].foreach(worklist.enqueue(_))
-    var budget = 20000
-
-    while (worklist.nonEmpty && budget > 0) {
-      budget -= 1
-      val node = worklist.dequeue()
-      if (visited.add(node)) {
-        if (pathNodes.contains(node)) return true
-        node.in(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach(worklist.enqueue(_))
-      }
-    }
-    false
-  }
-
-  private case class DependencyTrace(visited: List[CfgNode], matched: Option[CfgNode])
-
-  private def traceDependency(
-    startNodes: Iterable[CfgNode],
-    targets: Set[CfgNode],
-    forward: Boolean
-  ): DependencyTrace = {
-    val worklist = mutable.Queue.empty[CfgNode]
-    val visited  = mutable.LinkedHashSet.empty[CfgNode]
-    worklist ++= startNodes
-    var matched = Option.empty[CfgNode]
-
-    var budget = 20000
-    while (worklist.nonEmpty && matched.isEmpty && budget > 0) {
-      budget -= 1
-      val node = worklist.dequeue()
-      if (visited.add(node)) {
-        if (targets.contains(node)) matched = Some(node)
-        else {
-          val adjacent = if (forward) node.out(EdgeTypes.REACHING_DEF) else node.in(EdgeTypes.REACHING_DEF)
-          adjacent.collectAll[CfgNode].foreach(worklist.enqueue(_))
+  /** All nodes that can reach one of `targets` through REACHING_DEF within a few hops and inside the method, computed
+    * once per path.
+    */
+  private def reachableFromTaint(targets: Set[CfgNode]): Set[Long] = {
+    val maxDepth = Integer.getInteger("zipper.controlflow.provenance.depth", 16).intValue()
+    val reached  = mutable.Set.empty[Long]
+    val queue    = mutable.Queue.empty[(CfgNode, Int)]
+    targets.foreach(node => queue.enqueue((node, 0)))
+    while (queue.nonEmpty) {
+      val (node, depth) = queue.dequeue()
+      if (reached.add(node.id()) && depth < maxDepth && !node.isInstanceOf[MethodParameterIn]) {
+        node.in(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach { previous =>
+          if (previous.method.id() == node.method.id()) queue.enqueue((previous, depth + 1))
         }
       }
     }
-    DependencyTrace(visited.toList, matched)
-  }
-
-  private def controlsBranchNode(control: ControlStructure, node: CfgNode): Boolean = {
-    control.whenTrue.ast.contains(node) || control.whenFalse.ast.contains(node)
+    reached.toSet
   }
 
   private def dependsOnPath(node: CfgNode, pathNodes: Set[CfgNode]): Boolean = {

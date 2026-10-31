@@ -103,7 +103,7 @@ class DefaultTaintAnalysis(
       // step4. enhance taint paths with the control structures that guard or depend on them
       val enhancedPaths = taintPaths.map { path =>
         if (enableControlStructure) {
-          val selectedControlPath = controlStructurePathEnhancer.enhance(path, taintSourceNodes)
+          val selectedControlPath = controlStructurePathEnhancer.enhance(path, taintControlFlowProvenance)
           taintControlFlowProvenance.enhance(selectedControlPath)
         } else path
       }.toList

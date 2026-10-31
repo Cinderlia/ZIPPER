@@ -7,213 +7,129 @@ import io.shiftleft.semanticcpg.language.*
 
 import scala.collection.mutable
 
-/** Traces other taint sources that influence already-selected control structures. */
+/** Computes the data provenance of a control structure condition by walking the dataflow **backwards** from the
+  * condition, bounded to a small number of hops and to the enclosing method, and caches the result per control
+  * structure.
+  *
+  * A taint mark (a taint source, a node of an already processed path, or a tainted global/object) stops the walk,
+  * because the rest of its path is already recorded in the graph. Reaching a method parameter or a node outside the
+  * method also stops the walk: the enhancement never crosses method boundaries.
+  */
 final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   private val logger = org.slf4j.LoggerFactory.getLogger(this.getClass)
-  private case class CachedTrace(sourceId: Long, controlId: Long, nodes: List[CfgNode])
 
-  private val cachedPaths = mutable.ListBuffer.empty[CachedTrace]
+  private val maxDepth = Integer.getInteger("zipper.controlflow.provenance.depth", 16).intValue()
+  private val maxNodes = Integer.getInteger("zipper.controlflow.provenance.nodes", 50000).intValue()
 
+  private case class ControlGraph(
+    conditionIds: Set[Long],
+    nodes: mutable.Map[Long, CfgNode],
+    next: mutable.Map[Long, CfgNode],
+    sources: mutable.Set[Long],
+    taintHeads: mutable.Set[Long]
+  )
+
+  private val graphs       = mutable.Map.empty[Long, ControlGraph]
+  private val knownTainted = mutable.Set.empty[Long]
+  knownTainted ++= taintSources.map(_.id())
+
+  private def graphOf(control: ControlStructure): ControlGraph =
+    graphs.getOrElseUpdate(control.id(), buildGraph(control))
+
+  private def buildGraph(control: ControlStructure): ControlGraph = {
+    val methodId       = control.method.id()
+    val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
+    val graph = ControlGraph(
+      conditionNodes.map(_.id()).toSet,
+      mutable.Map.empty,
+      mutable.Map.empty,
+      mutable.Set.empty,
+      mutable.Set.empty
+    )
+    val visited = mutable.Set.empty[Long]
+    val queue   = mutable.Queue.empty[(CfgNode, Int)]
+    conditionNodes.foreach(node => queue.enqueue((node, 0)))
+
+    while (queue.nonEmpty && visited.size < maxNodes) {
+      val (node, depth) = queue.dequeue()
+      if (visited.add(node.id())) {
+        graph.nodes(node.id()) = node
+        if (taintSources.exists(_.id() == node.id())) graph.sources += node.id()
+        if (knownTainted.contains(node.id())) {
+          // a taint mark: the remaining path is already tainted, no need to look further
+          graph.taintHeads += node.id()
+        } else if (depth < maxDepth && !node.isInstanceOf[MethodParameterIn] && node.method.id() == methodId) {
+          node.in(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach { previous =>
+            if (!visited.contains(previous.id())) {
+              graph.next.getOrElseUpdate(previous.id(), node)
+              queue.enqueue((previous, depth + 1))
+            }
+          }
+        }
+      }
+    }
+    graph
+  }
+
+  def taintHeads(control: ControlStructure): Set[Long] = {
+    val graph = graphOf(control)
+    graph.taintHeads.toSet ++ graph.sources
+  }
+
+  def conditionDependsOnSources(control: ControlStructure): Boolean = graphOf(control).sources.nonEmpty
+
+  def conditionDependsOnPath(control: ControlStructure, pathNodeIds: Set[Long]): Boolean = {
+    val graph = graphOf(control)
+    graph.nodes.keySet.exists(pathNodeIds.contains)
+  }
+
+  /** Path from a taint head up to the condition (both inclusive). */
+  def pathToCondition(control: ControlStructure, headId: Long): Option[List[CfgNode]] = {
+    val graph = graphOf(control)
+    graph.nodes.get(headId).map { head =>
+      val result  = mutable.ListBuffer.empty[CfgNode]
+      var current = Option(head)
+      var hops    = 0
+      while (current.nonEmpty && hops <= maxDepth) {
+        val node = current.get
+        result += node
+        if (graph.conditionIds.contains(node.id())) current = None
+        else current = graph.next.get(node.id())
+        hops += 1
+      }
+      result.toList
+    }
+  }
+
+  /** Compatibility entry point: data path from a source to the control condition. */
+  def dataPath(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] =
+    pathToCondition(control, source.id())
+
+  def markTainted(nodes: Iterable[CfgNode]): Unit = nodes.foreach(node => knownTainted += node.id())
+
+  /** Adds, for every control structure of the path, the cached provenance of its condition. */
   def enhance(path: TaintPath): TaintPath = {
     if (path.path.isEmpty) return path
 
-    val mainSource        = path.source
-    val result            = mutable.ArrayBuffer.from(path.path)
-    val processedControls = mutable.Set.empty[Long]
-    val worklist          = mutable.Queue.empty[ControlStructure]
-    worklist ++= path.path.collect { case control: ControlStructure => control }
-    // best effort: never let provenance tracing block the whole analysis for an unbounded time
-    val deadline =
-      System.currentTimeMillis() + Integer.getInteger("zipper.controlflow.provenance.budgetMs", 60000).longValue()
+    val pathIds   = path.path.map(_.id()).toSet
+    val result    = mutable.ArrayBuffer.from(path.path)
+    val processed = mutable.Set.empty[Long]
 
-    while (worklist.nonEmpty && System.currentTimeMillis() < deadline) {
-      val control = worklist.dequeue()
-      if (processedControls.add(control.id())) {
-        taintSources.iterator.filterNot(_ == mainSource).foreach { source =>
-          traceFor(source, control).foreach { nodes =>
-            val insertionIndex = result.indexWhere(_.id() == control.id())
-            if (insertionIndex >= 0) {
-              val newNodes = nodes.filterNot(node => result.exists(_.id() == node.id()))
-              if (newNodes.nonEmpty) {
-                result.insertAll(insertionIndex, newNodes)
-              }
-              newNodes.collect { case nested: ControlStructure => nested }.foreach(worklist.enqueue(_))
-            }
-          }
+    path.path.collect { case control: ControlStructure => control }.foreach { control =>
+      if (processed.add(control.id())) {
+        val heads          = taintHeads(control).filterNot(pathIds.contains)
+        val insertionIndex = result.indexWhere(_.id() == control.id())
+        if (heads.nonEmpty && insertionIndex >= 0) {
+          val additions = heads.toList
+            .flatMap(head => pathToCondition(control, head))
+            .flatten
+            .filterNot(node => result.exists(_.id() == node.id()))
+          if (additions.nonEmpty) result.insertAll(insertionIndex, additions)
         }
       }
     }
 
-    if (System.currentTimeMillis() >= deadline)
-      logger.warn(s"[controlflow] provenance budget exhausted for path with ${path.path.size} nodes")
+    markTainted(path.path)
     path.copy(path = result.toList)
-  }
-
-  /** Data-dependency path from `source` to the condition of `control`, if the condition depends on `source`.
-    *
-    * This is the same trace used while propagating taint sources into control structures, exposed so that other
-    * provenance strategies (e.g. [[EmptySinkControlFlowTracer]]) can reuse it instead of reimplementing the search.
-    */
-  private val dataPathCache = mutable.Map.empty[(Long, Long), Option[List[CfgNode]]]
-
-  def dataPath(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] =
-    dataPathCache.getOrElseUpdate((source.id(), control.id()), findDataPath(source, control))
-
-  private def traceFor(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = {
-    findDataPath(source, control).flatMap { dataPath =>
-      cachedPath(source, control).orElse {
-        val trace = buildTrace(source, control, dataPath)
-        trace.foreach(nodes => cachePath(source, control, nodes))
-        trace
-      }
-    }
-  }
-
-  private def cachedPath(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = {
-    cachedPaths
-      .find(trace => trace.sourceId == source.id() && trace.controlId == control.id())
-      .map(_.nodes)
-  }
-
-  private def cachePath(source: CfgNode, control: ControlStructure, path: List[CfgNode]): Unit = {
-    val matchingEndpoints =
-      cachedPaths.filter(trace => trace.sourceId == source.id() && trace.controlId == control.id())
-    val contained = matchingEndpoints.filter(trace => isSubsequence(trace.nodes, path))
-    if (contained.nonEmpty) {
-      cachedPaths --= contained
-      cachedPaths += CachedTrace(source.id(), control.id(), path)
-    } else if (!matchingEndpoints.exists(trace => isSubsequence(path, trace.nodes))) {
-      cachedPaths += CachedTrace(source.id(), control.id(), path)
-    }
-  }
-
-  private def isSubsequence(candidate: List[CfgNode], path: List[CfgNode]): Boolean = {
-    var candidateIndex = 0
-    path.foreach { node =>
-      if (candidateIndex < candidate.size && candidate(candidateIndex).id() == node.id())
-        candidateIndex += 1
-    }
-    candidateIndex == candidate.size
-  }
-
-  private def buildTrace(source: CfgNode, control: ControlStructure, dataPath: List[CfgNode]): Option[List[CfgNode]] = {
-    val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
-    val start          = sourceAssignment(source).getOrElse(source)
-    val controls       = controlsOnCfgRoute(start, control, conditionNodes.toSet)
-    Some(distinctNodes(dataPath ++ controls ++ conditionNodes ++ List(control)))
-  }
-
-  private def findDataPath(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = {
-    val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
-    findReachingDefPath(source, conditionNodes.toSet)
-  }
-
-  private def findReachingDefPath(source: CfgNode, targets: Set[CfgNode]): Option[List[CfgNode]] = {
-    if (targets.contains(source)) return Some(List(source))
-
-    val worklist = mutable.Queue(source)
-    val visited  = mutable.Set.empty[CfgNode]
-    val parent   = mutable.Map.empty[CfgNode, CfgNode]
-    var matched  = Option.empty[CfgNode]
-    // REACHING_DEF can be large; stop the search instead of walking the whole graph for every (source, control)
-    var budget = 20000
-
-    while (worklist.nonEmpty && matched.isEmpty && budget > 0) {
-      budget -= 1
-      val node = worklist.dequeue()
-      if (visited.add(node)) {
-        if (targets.contains(node)) matched = Some(node)
-        else {
-          node.out(EdgeTypes.REACHING_DEF).collectAll[CfgNode].foreach { successor =>
-            if (isDataFlowNode(successor) && !visited.contains(successor)) {
-              parent.getOrElseUpdate(successor, node)
-              worklist += successor
-            }
-          }
-        }
-      }
-    }
-
-    matched.map(target => reconstructPath(source, target, parent))
-  }
-
-  private def isDataFlowNode(node: CfgNode): Boolean = node match {
-    case _: (Method | ControlStructure | FieldIdentifier | JumpTarget | MethodReturn) => false
-    case _                                                                            => true
-  }
-
-  private def reconstructPath(
-    source: CfgNode,
-    target: CfgNode,
-    parent: mutable.Map[CfgNode, CfgNode]
-  ): List[CfgNode] = {
-    val reversed = mutable.ListBuffer(target)
-    var current  = target
-    while (current != source && parent.contains(current)) {
-      current = parent(current)
-      reversed += current
-    }
-    reversed.reverse.toList
-  }
-
-  private def sourceAssignment(source: CfgNode): Option[Call] = {
-    source.method.cfgNode
-      .collectAll[Call]
-      .filter(call => call.isGenericAssignment && call.argumentOption(2).exists(_.ast.contains(source)))
-      .toList
-      .sortBy(_.order)
-      .headOption
-  }
-
-  private def controlsOnCfgRoute(
-    start: CfgNode,
-    target: ControlStructure,
-    conditionNodes: Set[CfgNode]
-  ): List[CfgNode] = {
-    val worklist = mutable.Queue(start)
-    val visited  = mutable.Set.empty[CfgNode]
-    val controls = mutable.LinkedHashSet.empty[ControlStructure]
-    var reached  = false
-
-    while (worklist.nonEmpty && !reached) {
-      val node = worklist.dequeue()
-      if (visited.add(node)) {
-        collectEnclosingControls(node).foreach(controls += _)
-        if (node == target || conditionNodes.contains(node)) reached = true
-        else {
-          val successors = node match {
-            case _: MethodParameterIn => node.method.cfgFirst
-            case _                    => node.cfgNext
-          }
-          successors.foreach(worklist.enqueue(_))
-        }
-      }
-    }
-
-    controls.toList.filterNot(_ == target)
-  }
-
-  private def collectEnclosingControls(node: CfgNode): List[ControlStructure] = {
-    val controls = mutable.ListBuffer.empty[ControlStructure]
-    node match {
-      case control: ControlStructure => controls += control
-      case _                         =>
-    }
-
-    val visited          = mutable.Set.empty[ControlStructure]
-    var current: AstNode = node
-    var closest          = current.getClosest[ControlStructure]
-    while (closest.nonEmpty && visited.add(closest.get)) {
-      val control = closest.get
-      controls += control
-      current = control
-      closest = current.getClosest[ControlStructure]
-    }
-    controls.toList
-  }
-
-  private def distinctNodes(nodes: List[CfgNode]): List[CfgNode] = {
-    val seen = mutable.Set.empty[Long]
-    nodes.filter(node => seen.add(node.id()))
   }
 }
