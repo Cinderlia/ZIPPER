@@ -35,8 +35,37 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   private val knownTainted = mutable.Set.empty[Long]
   knownTainted ++= taintSources.map(_.id())
 
-  private def graphOf(control: ControlStructure): ControlGraph =
-    graphs.getOrElseUpdate(control.id(), buildGraph(control))
+  // cache statistics: graphs are keyed by control-structure id and shared by every path that contains it
+  private var lookups: Long      = 0L
+  private var misses: Long       = 0L
+  private var sampledMisses: Int = 0
+  private var lastSampleAt: Long = 0L
+
+  private def graphOf(control: ControlStructure): ControlGraph = {
+    lookups += 1
+    graphs.get(control.id()) match {
+      case Some(graph) => graph
+      case None =>
+        misses += 1
+        val now = System.currentTimeMillis()
+        // sample a few misses, spread over time, together with the live cache table
+        if (sampledMisses < 20 && (sampledMisses < 3 || now - lastSampleAt > 3000)) {
+          sampledMisses += 1
+          lastSampleAt = now
+          logger.info(
+            s"[controlflow] cache miss #$misses ${location(control)} cacheSize=${graphs.size} " +
+              s"tainted=${knownTainted.size} knownKeys=${graphs.keys.take(20).mkString(",")}"
+          )
+        }
+        if (lookups % 200 == 0)
+          logger.info(
+            s"[controlflow] cache lookups=$lookups misses=$misses hitRate=${"%.2f".format((lookups - misses).toDouble / lookups)}"
+          )
+        val graph = buildGraph(control)
+        graphs(control.id()) = graph
+        graph
+    }
+  }
 
   private def location(control: ControlStructure): String =
     s"${control.file.headOption.map(_.name).getOrElse("?")}:${control.lineNumber.getOrElse(-1)} ${control.code.take(40)}"

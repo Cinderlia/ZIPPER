@@ -10,6 +10,15 @@ import scala.collection.mutable
 /** Adds control structures that affect a taint path or depend on its tainted values. */
 final class ControlStructurePathEnhancer {
   private val logger = org.slf4j.LoggerFactory.getLogger(this.getClass)
+
+  private val branchCache = mutable.Map.empty[Long, Set[Long]]
+
+  private def branchNodeIds(control: ControlStructure): Set[Long] =
+    branchCache.getOrElseUpdate(control.id(), (control.whenTrue.ast ++ control.whenFalse.ast).map(_.id()).toSet)
+
+  private var segmentCalls: Long      = 0L
+  private var segmentNodesTotal: Long = 0L
+  private var segmentMs: Long         = 0L
   def enhance(path: TaintPath, provenance: TaintControlFlowProvenance): TaintPath = {
     if (path.path.size < 2) return path
     logger.info(s"[controlflow] enhance path nodes=${path.path.size}")
@@ -37,12 +46,21 @@ final class ControlStructurePathEnhancer {
               .getOrElse(-1)}" +
             s" -> ${toNode.file.headOption.map(_.name).getOrElse("?")}:${toNode.lineNumber.getOrElse(-1)}"
         )
-        val segment = cfgSegment(fromNode, toNode)
+        val segmentStarted = System.currentTimeMillis()
+        val segment        = cfgSegment(fromNode, toNode)
+        segmentCalls += 1
+        segmentNodesTotal += segment.nodes.size
+        segmentMs += System.currentTimeMillis() - segmentStarted
+        if (segmentCalls % 50 == 0)
+          logger.info(
+            s"[controlflow] cfgSegment calls=$segmentCalls avgNodes=${segmentNodesTotal / segmentCalls} totalMs=$segmentMs"
+          )
         logger.info(s"[controlflow] segment nodes=${segment.nodes.size} controls=${segment.controls.size}")
         val relevantControls = segment.controls.filter { control =>
-          val branchPathNodes = controlsPathNodes(control, segmentPathNodes)
+          val branchIds       = branchNodeIds(control)
+          val branchPathNodes = segmentPathNodes.filter(node => branchIds.contains(node.id())).toList
           val branchDependentNodes = segment.nodes.filter { candidate =>
-            controlsBranchNode(control, candidate) && taintReachable.contains(candidate.id())
+            branchIds.contains(candidate.id()) && taintReachable.contains(candidate.id())
           }
           val conditionIsTainted = provenance.conditionDependsOnPath(control, segmentPathNodes.map(_.id()).toSet) ||
             provenance.conditionDependsOnSources(control)
@@ -52,7 +70,8 @@ final class ControlStructurePathEnhancer {
         val conditionNodeSet = conditionNodes.toSet
         val controlNodeSet   = relevantControls.toSet
         val dependentBodyNodes = segment.nodes.filter { candidate =>
-          relevantControls.exists(controlsBranchNode(_, candidate)) && taintReachable.contains(candidate.id())
+          relevantControls.exists(control => branchNodeIds(control).contains(candidate.id())) &&
+          taintReachable.contains(candidate.id())
         }
         val dependentStatements = dependentBodyNodes.flatMap {
           case call: Call if call.isGenericAssignment => Some(call)

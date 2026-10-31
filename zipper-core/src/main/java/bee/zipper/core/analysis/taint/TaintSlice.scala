@@ -46,21 +46,65 @@ object SourceCache {
     .getOrElse("")
   private val files = mutable.Map.empty[String, Array[String]]
 
+  private def linesOf(file: String): Array[String] =
+    files.getOrElseUpdate(
+      file, {
+        try {
+          val path = java.nio.file.Paths.get(root + file)
+          if (java.nio.file.Files.exists(path))
+            java.nio.file.Files.readAllLines(path).toArray(new Array[String](0))
+          else Array.empty[String]
+        } catch { case _: Throwable => Array.empty[String] }
+      }
+    )
+
   def codeAt(file: String, line: Int): Option[String] = {
     if (root.isEmpty || file.isEmpty || line <= 0) None
     else {
-      val lines = files.getOrElseUpdate(
-        file, {
-          try {
-            val path = java.nio.file.Paths.get(root + file)
-            if (java.nio.file.Files.exists(path))
-              java.nio.file.Files.readAllLines(path).toArray(new Array[String](0))
-            else Array.empty[String]
-          } catch { case _: Throwable => Array.empty[String] }
-        }
-      )
+      val lines = linesOf(file)
       if (line <= lines.length) Some(lines(line - 1).trim) else None
     }
+  }
+
+  /** Complete statement starting at (file, line). A sink can span several lines (`printf(` ...), so following lines are
+    * appended while brackets are unbalanced, up to a small limit.
+    */
+  def statementAt(file: String, line: Int): Option[String] = {
+    if (root.isEmpty || file.isEmpty || line <= 0) None
+    else {
+      val lines = linesOf(file)
+      if (line > lines.length) None
+      else {
+        val text   = new StringBuilder
+        var depth  = 0
+        var cursor = line
+        var added  = 0
+        var done   = false
+        while (!done && cursor <= lines.length && added < 20) {
+          val current = lines(cursor - 1)
+          if (added > 0) text.append(' ')
+          text.append(current.trim)
+          depth += bracketBalance(current)
+          added += 1
+          val trimmed   = current.trim
+          val endsBlock = trimmed.endsWith(";") || trimmed.endsWith("{") || trimmed.endsWith("}")
+          val single    = depth <= 0 && added == 1 && !trimmed.endsWith("(") && !trimmed.endsWith(",")
+          if (endsBlock || single) done = true
+          cursor += 1
+        }
+        Some(text.toString)
+      }
+    }
+  }
+
+  private def bracketBalance(text: String): Int = {
+    var depth = 0
+    text.foreach {
+      case '(' | '[' | '{' => depth += 1
+      case ')' | ']' | '}' => depth -= 1
+      case _               => ()
+    }
+    depth
   }
 }
 
@@ -85,7 +129,7 @@ private[taint] object TaintSliceSupport {
 
   /** Complete source line when available, otherwise the node code. */
   def displayCode(node: CfgNode): String =
-    SourceCache.codeAt(fileOf(node), lineOf(node)).getOrElse(node.code)
+    SourceCache.statementAt(fileOf(node), lineOf(node)).getOrElse(node.code)
 
   /** One node per source line: different fragments of the same line collapse into the most representative node. */
   def perLine(nodes: List[CfgNode], sourceIds: Set[Long], sinkId: Long): List[CfgNode] =
