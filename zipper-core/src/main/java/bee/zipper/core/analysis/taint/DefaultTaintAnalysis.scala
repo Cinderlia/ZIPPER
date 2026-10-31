@@ -82,12 +82,18 @@ class DefaultTaintAnalysis(
       val flowStart   = System.currentTimeMillis()
       val pruneProbes = java.lang.Boolean.getBoolean("zipper.taint.pruneProbes")
       val logProbes   = java.lang.Boolean.getBoolean("zipper.taint.logProbes")
-      val pruner      = if (pruneProbes) Some(new TaintProbePruner(sources.toSet)) else None
-      var skipped     = 0
+      // measurement mode: still run the engine for pruned probes to detect false kills
+      val shadowSkipped    = java.lang.Boolean.getBoolean("zipper.taint.shadowSkipped")
+      val pruner           = if (pruneProbes) Some(new TaintProbePruner(sources.toSet)) else None
+      var skipped          = 0
+      var prunedCandidates = 0
+      var prunedMs         = 0L
       val probeResults = extractedSinks.probes.zipWithIndex.map { case (probe, index) =>
         val probeStart    = System.currentTimeMillis()
         val probeLocation = s"${probe.file.headOption.map(_.name).getOrElse("?")}:${probe.lineNumber.getOrElse(-1)}"
-        val found = if (pruner.exists(_.isConstantOnly(probe))) {
+        val constantOnly  = pruner.exists(_.isConstantOnly(probe))
+        if (constantOnly) prunedCandidates += 1
+        val found = if (constantOnly && !shadowSkipped) {
           skipped += 1
           if (logProbes) logger.info(s"[prune] skip kind=$kind $probeLocation constant-only")
           List.empty
@@ -99,6 +105,11 @@ class DefaultTaintAnalysis(
         }
         val elapsed  = System.currentTimeMillis() - probeStart
         val maxDepth = if (found.isEmpty) 0 else found.map(_.elements.size).max
+        if (constantOnly && shadowSkipped) {
+          prunedMs += elapsed
+          if (found.nonEmpty)
+            logger.warn(s"[prune] false kill kind=$kind $probeLocation flows=${found.size}")
+        }
         if (elapsed >= 1000 || found.size > 200) {
           logger.info(
             s"[taint] slow probe kind=$kind $probeLocation elapsed=${elapsed}ms flows=${found.size} maxDepth=$maxDepth"
@@ -119,6 +130,7 @@ class DefaultTaintAnalysis(
       val maxDepth   = if (successful.isEmpty) 0 else successful.map(_._3).max
       logger.info(
         s"[taint] kind=$kind probes=${probeResults.size} ran=${probeResults.size - skipped} skipped=$skipped " +
+          s"prunedCandidates=$prunedCandidates prunedMs=$prunedMs " +
           s"withFlows=${successful.size} avgDepth=$avgDepth maxDepth=$maxDepth " +
           s"slowProbes=${probeResults.count(_._2 >= 1000)}"
       )
