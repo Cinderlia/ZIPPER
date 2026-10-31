@@ -9,6 +9,7 @@ import scala.collection.mutable
 
 /** Adds control structures that affect a taint path or depend on its tainted values. */
 final class ControlStructurePathEnhancer {
+  private val logger = org.slf4j.LoggerFactory.getLogger(this.getClass)
   def enhance(path: TaintPath, taintSources: Set[CfgNode]): TaintPath = {
     if (path.path.size < 2) return path
 
@@ -17,7 +18,9 @@ final class ControlStructurePathEnhancer {
     val insertedNodes = mutable.Set.empty[CfgNode]
 
     var segmentStart = 0
-    while (segmentStart < path.path.size) {
+    val deadline =
+      System.currentTimeMillis() + Integer.getInteger("zipper.controlflow.enhance.budgetMs", 120000).longValue()
+    while (segmentStart < path.path.size && System.currentTimeMillis() < deadline) {
       val method     = path.path(segmentStart).method
       var segmentEnd = segmentStart
       while (segmentEnd + 1 < path.path.size && path.path(segmentEnd + 1).method == method) {
@@ -59,6 +62,8 @@ final class ControlStructurePathEnhancer {
       segmentStart = segmentEnd + 1
     }
 
+    if (System.currentTimeMillis() >= deadline)
+      logger.warn(s"[controlflow] enhancement budget exhausted for path with ${path.path.size} nodes")
     val result = mutable.ListBuffer.empty[CfgNode]
     path.path.zipWithIndex.foreach { case (node, index) =>
       result += node
@@ -80,7 +85,9 @@ final class ControlStructurePathEnhancer {
       case _                    => node.cfgNext
     }
 
-    while (worklist.nonEmpty) {
+    var budget = 50000
+    while (worklist.nonEmpty && budget > 0) {
+      budget -= 1
       val node = worklist.dequeue()
       if (visited.add(node)) {
         nodes += node
@@ -133,8 +140,10 @@ final class ControlStructurePathEnhancer {
     val worklist = mutable.Queue.empty[CfgNode]
     val visited  = mutable.Set.empty[CfgNode]
     control.condition.ast.collectAll[CfgNode].foreach(worklist.enqueue(_))
+    var budget = 20000
 
-    while (worklist.nonEmpty) {
+    while (worklist.nonEmpty && budget > 0) {
+      budget -= 1
       val node = worklist.dequeue()
       if (visited.add(node)) {
         if (pathNodes.contains(node)) return true
@@ -156,7 +165,9 @@ final class ControlStructurePathEnhancer {
     worklist ++= startNodes
     var matched = Option.empty[CfgNode]
 
-    while (worklist.nonEmpty && matched.isEmpty) {
+    var budget = 20000
+    while (worklist.nonEmpty && matched.isEmpty && budget > 0) {
+      budget -= 1
       val node = worklist.dequeue()
       if (visited.add(node)) {
         if (targets.contains(node)) matched = Some(node)
@@ -176,8 +187,10 @@ final class ControlStructurePathEnhancer {
   private def dependsOnPath(node: CfgNode, pathNodes: Set[CfgNode]): Boolean = {
     val worklist = mutable.Queue(node)
     val visited  = mutable.Set.empty[CfgNode]
+    var budget   = 20000
 
-    while (worklist.nonEmpty) {
+    while (worklist.nonEmpty && budget > 0) {
+      budget -= 1
       val current = worklist.dequeue()
       if (visited.add(current)) {
         if (pathNodes.contains(current)) return true

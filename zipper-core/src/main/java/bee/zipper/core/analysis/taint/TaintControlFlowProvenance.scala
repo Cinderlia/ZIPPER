@@ -9,6 +9,7 @@ import scala.collection.mutable
 
 /** Traces other taint sources that influence already-selected control structures. */
 final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
+  private val logger = org.slf4j.LoggerFactory.getLogger(this.getClass)
   private case class CachedTrace(sourceId: Long, controlId: Long, nodes: List[CfgNode])
 
   private val cachedPaths = mutable.ListBuffer.empty[CachedTrace]
@@ -21,8 +22,11 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
     val processedControls = mutable.Set.empty[Long]
     val worklist          = mutable.Queue.empty[ControlStructure]
     worklist ++= path.path.collect { case control: ControlStructure => control }
+    // best effort: never let provenance tracing block the whole analysis for an unbounded time
+    val deadline =
+      System.currentTimeMillis() + Integer.getInteger("zipper.controlflow.provenance.budgetMs", 60000).longValue()
 
-    while (worklist.nonEmpty) {
+    while (worklist.nonEmpty && System.currentTimeMillis() < deadline) {
       val control = worklist.dequeue()
       if (processedControls.add(control.id())) {
         taintSources.iterator.filterNot(_ == mainSource).foreach { source =>
@@ -40,6 +44,8 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
       }
     }
 
+    if (System.currentTimeMillis() >= deadline)
+      logger.warn(s"[controlflow] provenance budget exhausted for path with ${path.path.size} nodes")
     path.copy(path = result.toList)
   }
 
@@ -48,7 +54,10 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
     * This is the same trace used while propagating taint sources into control structures, exposed so that other
     * provenance strategies (e.g. [[EmptySinkControlFlowTracer]]) can reuse it instead of reimplementing the search.
     */
-  def dataPath(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = findDataPath(source, control)
+  private val dataPathCache = mutable.Map.empty[(Long, Long), Option[List[CfgNode]]]
+
+  def dataPath(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] =
+    dataPathCache.getOrElseUpdate((source.id(), control.id()), findDataPath(source, control))
 
   private def traceFor(source: CfgNode, control: ControlStructure): Option[List[CfgNode]] = {
     findDataPath(source, control).flatMap { dataPath =>
@@ -106,8 +115,11 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
     val visited  = mutable.Set.empty[CfgNode]
     val parent   = mutable.Map.empty[CfgNode, CfgNode]
     var matched  = Option.empty[CfgNode]
+    // REACHING_DEF can be large; stop the search instead of walking the whole graph for every (source, control)
+    var budget = 20000
 
-    while (worklist.nonEmpty && matched.isEmpty) {
+    while (worklist.nonEmpty && matched.isEmpty && budget > 0) {
+      budget -= 1
       val node = worklist.dequeue()
       if (visited.add(node)) {
         if (targets.contains(node)) matched = Some(node)
