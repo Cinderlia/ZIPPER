@@ -76,25 +76,52 @@ class DefaultTaintAnalysis(
       logger.info(
         s"[taint] kind=$kind sinks=${taintSinks.size} probes=${extractedSinks.probes.size} sources=${sources.size}"
       )
-      // step1. joern taint engine entrypoint. Probes are processed in chunks so the log shows progress instead of
-      // staying silent while the dataflow engine expands a large number of tasks.
-      val chunkSize = Integer.getInteger("zipper.taint.progress.chunk", 8).intValue()
-      val flowStart = System.currentTimeMillis()
-      val flows = extractedSinks.probes
-        .grouped(chunkSize)
-        .flatMap { chunk =>
-          val chunkStart = System.currentTimeMillis()
-          val found = chunk
+      // step1. joern taint engine entrypoint. Probes are searched one by one so slow probes and their outcome are
+      // visible: whether they reached a source and how deep the found paths are.
+      val chunkSize   = Integer.getInteger("zipper.taint.progress.chunk", 8).intValue()
+      val flowStart   = System.currentTimeMillis()
+      val pruneProbes = java.lang.Boolean.getBoolean("zipper.taint.pruneProbes")
+      val logProbes   = java.lang.Boolean.getBoolean("zipper.taint.logProbes")
+      val pruner      = if (pruneProbes) Some(new TaintProbePruner(sources.toSet)) else None
+      var skipped     = 0
+      val probeResults = extractedSinks.probes.zipWithIndex.map { case (probe, index) =>
+        val probeStart    = System.currentTimeMillis()
+        val probeLocation = s"${probe.file.headOption.map(_.name).getOrElse("?")}:${probe.lineNumber.getOrElse(-1)}"
+        val found = if (pruner.exists(_.isConstantOnly(probe))) {
+          skipped += 1
+          if (logProbes) logger.info(s"[prune] skip kind=$kind $probeLocation constant-only")
+          List.empty
+        } else {
+          Iterator(probe)
             .reachableByFlows(sources)
             .map(path => refactorPath(path, extractedSinks.argumentToCall))
             .toList // refactor paths by appending real sink nodes if needed
-          logger.info(
-            s"[taint] kind=$kind chunk=${chunk.size} flows=${found.size} " +
-              s"elapsed=${System.currentTimeMillis() - chunkStart}ms total=${System.currentTimeMillis() - flowStart}ms"
-          )
-          found
         }
-        .toList
+        val elapsed  = System.currentTimeMillis() - probeStart
+        val maxDepth = if (found.isEmpty) 0 else found.map(_.elements.size).max
+        if (elapsed >= 1000 || found.size > 200) {
+          logger.info(
+            s"[taint] slow probe kind=$kind $probeLocation elapsed=${elapsed}ms flows=${found.size} maxDepth=$maxDepth"
+          )
+        }
+        if (logProbes)
+          logger.info(s"[probe] kind=$kind $probeLocation elapsed=${elapsed}ms flows=${found.size} maxDepth=$maxDepth")
+        if ((index + 1) % chunkSize == 0)
+          logger.info(
+            s"[taint] kind=$kind progress=${index + 1}/${extractedSinks.probes.size} " +
+              s"total=${System.currentTimeMillis() - flowStart}ms"
+          )
+        (found, elapsed, maxDepth)
+      }.toList
+      val flows      = probeResults.flatMap(_._1)
+      val successful = probeResults.filter(_._1.nonEmpty)
+      val avgDepth   = if (successful.isEmpty) 0 else successful.map(_._3).sum / successful.size
+      val maxDepth   = if (successful.isEmpty) 0 else successful.map(_._3).max
+      logger.info(
+        s"[taint] kind=$kind probes=${probeResults.size} ran=${probeResults.size - skipped} skipped=$skipped " +
+          s"withFlows=${successful.size} avgDepth=$avgDepth maxDepth=$maxDepth " +
+          s"slowProbes=${probeResults.count(_._2 >= 1000)}"
+      )
       // step2. remove duplicate flows if exploit mode is disabled
       val deduplicated = if (!exploitMode && enableDeduplicateFlow) DuplicateFlowProcessor.deduplicate(flows) else flows
       // step3. transform joern `Path` into `TaintPath`
