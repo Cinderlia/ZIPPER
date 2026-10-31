@@ -287,7 +287,7 @@ object NaviAnalysis {
           byHead.getOrElse(nodeKey(last), Nil) ++
           // the same statement may end at the outer call (get_row) but start at the inner one (prepare)
           byHead.getOrElse(lineKey(last), Nil)
-      tails.map(tail => TaintPath(tail.kind, order = true, prefix.path ++ tail.path.drop(1)))
+      tails.map(tail => TaintPath(tail.kind, order = true, prefix.path ++ tail.path.drop(1), Some(tail.sink)))
     }
 
     // WordPress bridge: a database row is copied into an object field dynamically (`$this->$key = $value`), so the
@@ -330,7 +330,7 @@ object NaviAnalysis {
       .groupBy(_.path.head.id())
       .values
       .map(_.minBy(_.path.size))
-      .map(prefix => TaintPath(suffix.kind, order = true, prefix.path ++ suffix.path))
+      .map(prefix => TaintPath(suffix.kind, order = true, prefix.path ++ suffix.path, Some(suffix.sink)))
       .toList
 
   private def lineKey(node: CfgNode): (String, Int) =

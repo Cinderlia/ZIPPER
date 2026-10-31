@@ -98,7 +98,10 @@ class DefaultTaintAnalysis(
       // step2. remove duplicate flows if exploit mode is disabled
       val deduplicated = if (!exploitMode && enableDeduplicateFlow) DuplicateFlowProcessor.deduplicate(flows) else flows
       // step3. transform joern `Path` into `TaintPath`
-      val taintPaths = deduplicated.map(path => TaintPath(kind, true, extractCfgNodes(path))).toList
+      val taintPaths = deduplicated.map { path =>
+        val nodes = extractCfgNodes(path)
+        TaintPath(kind, true, nodes, nodes.lastOption) // record the real sink before enhancement
+      }.toList
       logger.info(s"[taint] kind=$kind taintPaths=${taintPaths.size}")
       // step4. enhance taint paths with the control structures that guard or depend on them
       val enhancedPaths = taintPaths.map { path =>
@@ -227,10 +230,10 @@ class DefaultTaintAnalysis(
     *   [[untaintedSinkPaths]]
     */
   private def emptySinkPath(kind: String, sink: CfgNode, taintedPaths: List[TaintPath]): TaintPath = {
-    val singleNodePath = TaintPath(kind, true, List(sink))
+    val singleNodePath = TaintPath(kind, true, List(sink), Some(sink))
     val tracedPath = emptySinkTracer
       .trace(sink, taintedPaths)
-      .map(nodes => taintControlFlowProvenance.enhance(TaintPath(kind, true, nodes)))
+      .map(nodes => taintControlFlowProvenance.enhance(TaintPath(kind, true, nodes, Some(sink))))
     if (enableControlStructure) tracedPath.getOrElse(singleNodePath)
     else tracedPath.filter(pathFilter.isValid).getOrElse(singleNodePath)
   }

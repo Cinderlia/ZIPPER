@@ -58,9 +58,8 @@ final class ControlStructurePathEnhancer {
           case call: Call if call.isGenericAssignment => Some(call)
           case node                                   => node.getClosest[Call].filter(_.isGenericAssignment)
         }
-        val additions =
-          (segment.nodes.filter(node => controlNodeSet.contains(node) || conditionNodeSet.contains(node)) ++
-            dependentBodyNodes ++ dependentStatements ++ relevantControls ++ conditionNodes).distinct
+        // only the guard condition, the control node and the statements that really depend on the path
+        val additions      = (dependentStatements ++ relevantControls ++ conditionNodes).distinct
         val insertionIndex = segmentEnd - 1
         val insertion      = insertions.getOrElseUpdate(insertionIndex, mutable.LinkedHashSet.empty[CfgNode])
         additions.foreach { candidate =>

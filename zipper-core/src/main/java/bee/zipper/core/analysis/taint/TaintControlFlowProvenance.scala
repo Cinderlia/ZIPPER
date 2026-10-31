@@ -18,6 +18,8 @@ import scala.collection.mutable
 final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   private val logger = org.slf4j.LoggerFactory.getLogger(this.getClass)
 
+  // the backtrack is limited to 16 hops along REACHING_DEF; if no taint mark is met inside them, the condition is
+  // considered unaffected
   private val maxDepth = Integer.getInteger("zipper.controlflow.provenance.depth", 16).intValue()
   private val maxNodes = Integer.getInteger("zipper.controlflow.provenance.nodes", 50000).intValue()
 
