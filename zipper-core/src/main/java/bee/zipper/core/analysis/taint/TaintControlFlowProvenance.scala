@@ -36,7 +36,11 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   private def graphOf(control: ControlStructure): ControlGraph =
     graphs.getOrElseUpdate(control.id(), buildGraph(control))
 
+  private def location(control: ControlStructure): String =
+    s"${control.file.headOption.map(_.name).getOrElse("?")}:${control.lineNumber.getOrElse(-1)} ${control.code.take(40)}"
+
   private def buildGraph(control: ControlStructure): ControlGraph = {
+    val startedAt      = System.currentTimeMillis()
     val methodId       = control.method.id()
     val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
     val graph = ControlGraph(
@@ -51,6 +55,8 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
     conditionNodes.foreach(node => queue.enqueue((node, 0)))
 
     while (queue.nonEmpty && visited.size < maxNodes) {
+      if (visited.size > 0 && visited.size % 5000 == 0)
+        logger.info(s"[controlflow] backtrack ${location(control)} visited=${visited.size} queue=${queue.size}")
       val (node, depth) = queue.dequeue()
       if (visited.add(node.id())) {
         graph.nodes(node.id()) = node
@@ -68,6 +74,10 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
         }
       }
     }
+    logger.info(
+      s"[controlflow] backtrack ${location(control)} visited=${visited.size} heads=${graph.taintHeads.size} " +
+        s"sources=${graph.sources.size} elapsed=${System.currentTimeMillis() - startedAt}ms"
+    )
     graph
   }
 

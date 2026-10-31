@@ -12,6 +12,7 @@ final class ControlStructurePathEnhancer {
   private val logger = org.slf4j.LoggerFactory.getLogger(this.getClass)
   def enhance(path: TaintPath, provenance: TaintControlFlowProvenance): TaintPath = {
     if (path.path.size < 2) return path
+    logger.info(s"[controlflow] enhance path nodes=${path.path.size}")
 
     val taintNodes = path.path.toSet
     // one reverse reachability pass over REACHING_DEF instead of a BFS per segment node
@@ -29,7 +30,15 @@ final class ControlStructurePathEnhancer {
 
       if (segmentEnd > segmentStart) {
         val segmentPathNodes = path.path.slice(segmentStart, segmentEnd + 1).toSet
-        val segment          = cfgSegment(path.path(segmentStart), path.path(segmentEnd))
+        val fromNode         = path.path(segmentStart)
+        val toNode           = path.path(segmentEnd)
+        logger.info(
+          s"[controlflow] segment ${fromNode.file.headOption.map(_.name).getOrElse("?")}:${fromNode.lineNumber
+              .getOrElse(-1)}" +
+            s" -> ${toNode.file.headOption.map(_.name).getOrElse("?")}:${toNode.lineNumber.getOrElse(-1)}"
+        )
+        val segment = cfgSegment(fromNode, toNode)
+        logger.info(s"[controlflow] segment nodes=${segment.nodes.size} controls=${segment.controls.size}")
         val relevantControls = segment.controls.filter { control =>
           val branchPathNodes = controlsPathNodes(control, segmentPathNodes)
           val branchDependentNodes = segment.nodes.filter { candidate =>
