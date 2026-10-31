@@ -144,64 +144,6 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
     reversed.reverse.toList
   }
 
-  private def findAssignmentPath(
-    source: CfgNode,
-    control: ControlStructure,
-    conditionNodes: List[CfgNode]
-  ): Option[List[CfgNode]] = {
-    val assignments      = control.method.cfgNode.collectAll[Call].filter(_.isGenericAssignment).toList
-    val taintedVariables = mutable.Map.empty[String, List[CfgNode]]
-    var changed          = true
-
-    def addTaintedVariable(name: String, path: List[CfgNode]): Unit = {
-      taintedVariables.get(name) match {
-        case Some(existing) if existing.size <= path.size =>
-        case _ =>
-          taintedVariables.update(name, path)
-          changed = true
-      }
-    }
-
-    while (changed) {
-      changed = false
-      assignments.foreach { assignment =>
-        val target = assignment.argumentOption(1)
-        val value  = assignment.argumentOption(2)
-        for {
-          lhs   <- target
-          rhs   <- value
-          trace <- valueTrace(source, rhs, taintedVariables.toMap)
-        } addTaintedVariable(lhs.code, distinctNodes(trace ++ List(assignment, lhs)))
-      }
-    }
-
-    val conditionVariables = conditionNodes.collect { case identifier: Identifier => identifier }
-    conditionVariables.iterator
-      .flatMap(identifier =>
-        taintedVariables.get(identifier.code).map(trace => distinctNodes(trace ++ List(identifier)))
-      )
-      .toList
-      .sortBy(_.size)
-      .headOption
-  }
-
-  private def valueTrace(
-    source: CfgNode,
-    rhs: CfgNode,
-    taintedVariables: Map[String, List[CfgNode]]
-  ): Option[List[CfgNode]] = {
-    if (rhs == source || rhs.ast.contains(source)) Some(List(source, rhs))
-    else {
-      val variableTrace = rhs.ast
-        .collectAll[Identifier]
-        .flatMap(identifier => taintedVariables.get(identifier.code))
-        .toList
-        .sortBy(_.size)
-        .headOption
-      variableTrace.map(trace => distinctNodes(trace ++ List(rhs)))
-    }
-  }
-
   private def sourceAssignment(source: CfgNode): Option[Call] = {
     source.method.cfgNode
       .collectAll[Call]

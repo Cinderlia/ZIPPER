@@ -194,6 +194,12 @@ class EngineConfig {
   var customSinkConfigs: List[String] = new ArrayList[String]()
 
   @CommandLine.Option(
+    names = Array("--symbolic-print-depth"),
+    description = Array("Maximum depth when rendering symbolic values (default: 8; guards against cyclic structures)")
+  )
+  var symbolicPrintDepth: Int = 8
+
+  @CommandLine.Option(
     names = Array("--custom-navi"),
     description = Array("Custom navigation chain configuration file path (JSON)")
   )

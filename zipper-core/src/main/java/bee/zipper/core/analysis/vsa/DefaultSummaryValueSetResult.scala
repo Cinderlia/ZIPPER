@@ -25,6 +25,17 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
   import ctx.translator.translate
 
   private val logger = LoggerFactory.getLogger(this.getClass)
+
+  /** Renders a points-to set for logging without expanding huge or cyclic symbolic values. The number of printed
+    * entries and the total length are bounded.
+    */
+  private def renderPointsTo(points: Set[SymbolicValue]): String = {
+    val maxEntries = Integer.getInteger("zipper.symbolic.print.entries", 5).intValue()
+    val maxLength  = Integer.getInteger("zipper.symbolic.print.length", 2000).intValue()
+    val shown      = points.take(maxEntries).map(_.toString).mkString(", ")
+    val text       = if (points.size > maxEntries) s"Set(${points.size} entries: $shown, ...)" else s"Set($shown)"
+    if (text.length <= maxLength) text else text.take(maxLength) + "..."
+  }
   private val cache1 = MemoryCache.mk[(CfgNode, Boolean), Set[SymbolicValue]]
   private type CacheKey = (DefaultBasicBlock, String)
   private type Result   = (Set[SymbolicValue], List[SideEffectEnv])
@@ -128,7 +139,7 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
           }
         }
       )
-      logger.info(s"ptsOf(`${location(node, v)}`) = $pts")
+      logger.info(s"ptsOf(`${location(node, v)}`) = ${renderPointsTo(pts)}")
       pts
     } catch {
       case _: IllegalStateException =>
