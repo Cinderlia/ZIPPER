@@ -200,10 +200,15 @@ object NaviAnalysis {
         // that consist of the sink only) are never added.
         val extra =
           if (perSegment.size == 2) {
-            val first     = perSegment.head._1
-            val second    = perSegment(1)._1
-            val realSinks = first.filter(_.path.size > 1).map(_.sink.id()).toSet
-            second.filter(path => path.path.size > 1 && !realSinks.contains(path.path.head.id()))
+            val first        = perSegment.head._1
+            val second       = perSegment(1)._1
+            val realSinkIds  = first.filter(_.path.size > 1).map(_.sink.id()).toSet
+            val realSinkLine = first.filter(_.path.size > 1).map(path => lineKey(path.sink)).toSet
+            second.filter(path =>
+              path.path.size > 1 &&
+                !realSinkIds.contains(path.path.head.id()) &&
+                !realSinkLine.contains(lineKey(path.path.head))
+            )
           } else Nil
         val joinedAll = (joined ++ extra)
           .groupBy(path => (path.path.head.id(), path.path.last.id(), path.path.size))
@@ -263,15 +268,25 @@ object NaviAnalysis {
   /** Concatenates paths whose shared intermediate node matches (same node id, or same file/line/code). */
   private def joinPaths(left: List[TaintPath], right: List[TaintPath], bridgeWp: Boolean = false): List[TaintPath] = {
     val byHead: Map[Any, List[TaintPath]] = right
-      .flatMap(path => List((path.path.head.id(): Any, path), (nodeKey(path.path.head): Any, path)))
+      .flatMap(path =>
+        List(
+          (path.path.head.id(): Any, path),
+          (nodeKey(path.path.head): Any, path),
+          (lineKey(path.path.head): Any, path)
+        )
+      )
       .groupBy(_._1)
       .view
       .mapValues(_.map(_._2).distinct)
       .toMap
 
     val joined = left.flatMap { prefix =>
-      val last  = prefix.path.last
-      val tails = byHead.getOrElse(last.id(), Nil) ++ byHead.getOrElse(nodeKey(last), Nil)
+      val last = prefix.path.last
+      val tails =
+        byHead.getOrElse(last.id(), Nil) ++
+          byHead.getOrElse(nodeKey(last), Nil) ++
+          // the same statement may end at the outer call (get_row) but start at the inner one (prepare)
+          byHead.getOrElse(lineKey(last), Nil)
       tails.map(tail => TaintPath(tail.kind, order = true, prefix.path ++ tail.path.drop(1)))
     }
 
@@ -317,6 +332,9 @@ object NaviAnalysis {
       .map(_.minBy(_.path.size))
       .map(prefix => TaintPath(suffix.kind, order = true, prefix.path ++ suffix.path))
       .toList
+
+  private def lineKey(node: CfgNode): (String, Int) =
+    (node.file.headOption.map(_.name.replace(java.io.File.separator, "/")).getOrElse(""), node.lineNumber.getOrElse(-1))
 
   private def nodeKey(node: CfgNode): (String, Int, String) =
     (node.file.headOption.map(_.name).getOrElse(""), node.lineNumber.getOrElse(-1), node.code)
