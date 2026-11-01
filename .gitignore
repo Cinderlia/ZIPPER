@@ -43,3 +43,5 @@ build/
 /.idea/libraries/scala_sdk_2_13_10.xml
 *.zip
 .dsh-acl-recovery/
+# local analysis reports (not versioned)
+zipper-reports/
