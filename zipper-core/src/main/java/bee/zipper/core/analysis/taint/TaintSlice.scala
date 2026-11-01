@@ -135,6 +135,7 @@ private[taint] object TaintSliceSupport {
   /** One node per source line: different fragments of the same line collapse into the most representative node. */
   def perLine(nodes: List[CfgNode], sourceIds: Set[Long], sinkId: Long): List[CfgNode] =
     nodes
+      .filterNot(node => node.isInstanceOf[Method] || node.isInstanceOf[TypeDecl])
       .groupBy(node => (fileOf(node), lineOf(node)))
       .values
       .map(candidates => candidates.minBy(node => (roleRank(node, sourceIds, sinkId), -node.code.length)))
@@ -142,7 +143,8 @@ private[taint] object TaintSliceSupport {
       .sortBy(node => (fileOf(node), lineOf(node)))
 
   def roleRank(node: CfgNode, sourceIds: Set[Long], sinkId: Long): Int =
-    if (node.id() == sinkId) 0
+    if (node.isInstanceOf[Method] || node.isInstanceOf[TypeDecl]) 99
+    else if (node.id() == sinkId) 0
     else if (sourceIds.contains(node.id())) 1
     else
       node match {
@@ -213,6 +215,8 @@ object CompactFlowBuilder {
 
   private def significant(node: CfgNode, sourceIds: Set[Long], sinkId: Long): Boolean =
     node.id() == sinkId || sourceIds.contains(node.id()) || (node match {
+      case _: Method            => false
+      case _: TypeDecl          => false
       case _: ControlStructure  => true
       case _: MethodParameterIn => true
       case call: Call =>
@@ -273,6 +277,8 @@ object SinkGraphBuilder {
 
   private def significant(node: CfgNode, sourceIds: Set[Long], sinkId: Long): Boolean =
     node.id() == sinkId || sourceIds.contains(node.id()) || (node match {
+      case _: Method            => false
+      case _: TypeDecl          => false
       case _: ControlStructure  => true
       case _: MethodParameterIn => true
       case call: Call =>

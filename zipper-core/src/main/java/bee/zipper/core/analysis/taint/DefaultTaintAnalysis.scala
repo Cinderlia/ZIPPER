@@ -10,7 +10,7 @@ import bee.zipper.core.semantic.SemanticsGenerator
 import io.joern.dataflowengineoss.language.*
 import io.joern.dataflowengineoss.queryengine.{EngineConfig, EngineContext, TableEntry, TaskFingerprint}
 import io.shiftleft.codepropertygraph.generated.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes.CfgNode
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 
 /** @param sources
@@ -43,6 +43,18 @@ class DefaultTaintAnalysis(
   private val sinkGroupMerger       = new SinkGroupMerger
   private val implicitTaintEnhancer = new ImplicitTaintEnhancer(emptySinkTracer)
   private val logger                = org.slf4j.LoggerFactory.getLogger(this.getClass)
+  private val traceOrigins          = java.lang.Boolean.getBoolean("zipper.taint.traceOrigins")
+
+  private def locationOf(node: CfgNode): String =
+    s"${node.file.headOption.map(_.name).getOrElse("?")}:${node.lineNumber.getOrElse(-1)}"
+
+  private def traceAdded(origin: String, before: Set[Long], after: TaintPath): TaintPath = {
+    if (traceOrigins)
+      after.path.filterNot(node => before.contains(node.id())).foreach { node =>
+        logger.info(s"[origin] $origin ${locationOf(node)} ${node.code.linesIterator.mkString(" ").take(90)}")
+      }
+    after
+  }
 
   override def analyze(): TaintAnalysisResult = {
     implicit val context: EngineContext = {
@@ -85,13 +97,19 @@ class DefaultTaintAnalysis(
       // step3. transform joern `Path` into `TaintPath`
       val taintPaths = deduplicated.map { path =>
         val nodes = extractCfgNodes(path)
-        TaintPath(kind, true, nodes, nodes.lastOption) // record the real sink before enhancement
+        val taint = TaintPath(kind, true, nodes, nodes.lastOption) // record the real sink before enhancement
+        if (traceOrigins) taint.path.foreach(node => logger.info(s"[origin] dataflow ${locationOf(node)}"))
+        taint
       }.toList
       // step4. enhance taint paths with the control structures that guard or depend on them
       val enhancedPaths = taintPaths.map { path =>
         if (enableControlStructure) {
-          val selectedControlPath = controlStructurePathEnhancer.enhance(path, taintControlFlowProvenance)
-          taintControlFlowProvenance.enhance(selectedControlPath)
+          val beforeControl  = path.path.map(_.id()).toSet
+          val controlPath    = controlStructurePathEnhancer.enhance(path, taintControlFlowProvenance)
+          val withControl    = traceAdded("control-structure", beforeControl, controlPath)
+          val beforeProv     = withControl.path.map(_.id()).toSet
+          val provenancePath = taintControlFlowProvenance.enhance(withControl)
+          traceAdded("control-provenance", beforeProv, provenancePath)
         } else path
       }.toList
       // step5. drop sanitized/invalid taint paths. In control-structure mode the default path filter is
@@ -103,7 +121,12 @@ class DefaultTaintAnalysis(
       // step6. in control-structure mode, also keep sinks that receive no taint: their path is the sink itself
       val collectedPaths: List[TaintPath] =
         if (enableControlStructure && includeUntaintedSinks) {
-          enhancedPaths ++ untaintedSinkPaths(kind, extractedSinks.sinks, enhancedPaths)
+          val empty = untaintedSinkPaths(kind, extractedSinks.sinks, enhancedPaths)
+          if (traceOrigins)
+            empty.filterNot(path => enhancedPaths.exists(_.sink.id() == path.sink.id())).foreach { path =>
+              logger.info(s"[origin] empty-sink ${locationOf(path.sink)}")
+            }
+          enhancedPaths ++ empty
         } else enhancedPaths
       // step7. merge sinks that share a straight-line CFG segment, reporting their paths together
       val mergedPaths =
@@ -111,7 +134,10 @@ class DefaultTaintAnalysis(
       // step8. add the implicit taint of flags that are assigned under a tainted guard
       val implicitPaths =
         if (enableControlStructure && enableImplicitTaint)
-          mergedPaths.map(path => implicitTaintEnhancer.enhance(path, mergedPaths))
+          mergedPaths.map { path =>
+            val before = path.path.map(_.id()).toSet
+            traceAdded("implicit-taint", before, implicitTaintEnhancer.enhance(path, mergedPaths))
+          }
         else mergedPaths
       // step9. filter paths based on lightweight path-reachability
       if (enableReachAnalysis) implicitPaths.filter(path => pathFilter.isReachable(path)) else implicitPaths
@@ -129,9 +155,15 @@ class DefaultTaintAnalysis(
           else Some(path.copy(path = path.path.filter(node => node.id() == sink.id() || cfgReaches(node, sink))))
         }
 
-    val pathList = prunedPaths.map { path =>
-      if (path.path.exists(node => UnresolvedCallRegistry.contains(node.id()))) path.copy(unresolved = true) else path
-    }.toList
+    val pathList = prunedPaths
+      .flatMap(BranchTrimming.trim)
+      .map { path =>
+        val cleaned = path.copy(path = path.path.filterNot(isDeclaration))
+        if (cleaned.path.exists(node => UnresolvedCallRegistry.contains(node.id()))) cleaned.copy(unresolved = true)
+        else cleaned
+      }
+      .filter(path => path.path.nonEmpty)
+      .toList
     val slices = TaintSliceBuilder.build(pathList, taintSourceNodes, Some(new SqlProbeSelector))
     val flows  = CompactFlowBuilder.build(pathList, taintSourceNodes)
     val graphs = SinkGraphBuilder.build(pathList, taintSourceNodes)
@@ -230,7 +262,12 @@ class DefaultTaintAnalysis(
     }
   }
 
-  private def extractCfgNodes(path: Path): List[CfgNode] = path.elements.collect { case node: CfgNode => node }
+  /** Declarations are not executable statements: they must never enter a dataflow path, nor be extended or traced. */
+  private def isDeclaration(node: CfgNode): Boolean =
+    node.isInstanceOf[Method] || node.isInstanceOf[TypeDecl] || node.isInstanceOf[Member]
+
+  private def extractCfgNodes(path: Path): List[CfgNode] =
+    path.elements.collect { case node: CfgNode if !isDeclaration(node) => node }
 }
 
 object DefaultTaintAnalysis {

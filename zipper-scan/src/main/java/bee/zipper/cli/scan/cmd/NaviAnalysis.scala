@@ -9,6 +9,7 @@ import bee.zipper.core.analysis.taint.{
   CompactFlowBuilder,
   DefaultTaintAnalysis,
   PathChainMerger,
+  BranchTrimming,
   SinkGraphBuilder,
   SqlProbeSelector,
   TaintPath,
@@ -216,6 +217,7 @@ object NaviAnalysis {
           .values
           .map(_.head)
           .toList
+          .flatMap(BranchTrimming.trim)
         val joinedSources = perSegment
           .flatMap(_._2)
           .distinctBy(_.id())
