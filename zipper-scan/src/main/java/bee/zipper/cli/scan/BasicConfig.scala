@@ -194,6 +194,12 @@ class EngineConfig {
   var customSinkConfigs: List[String] = new ArrayList[String]()
 
   @CommandLine.Option(
+    names = Array("--enable-shared-result-table"),
+    description = Array("Reuse dataflow engine results across probe searches (same sources and semantics)")
+  )
+  var enableSharedResultTable: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--symbolic-print-depth"),
     description = Array("Maximum depth when rendering symbolic values (default: 8; guards against cyclic structures)")
   )

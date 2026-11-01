@@ -34,6 +34,7 @@ class TaintModule extends AppModule {
     // bound the rendering of cyclic symbolic structures such as self-referencing arrays
     System.setProperty("zipper.symbolic.print.depth", basicConfig.engineConfig.symbolicPrintDepth.toString)
     System.setProperty("zipper.source.root", basicConfig.projectConfig.path)
+    System.setProperty("zipper.taint.sharedTable", basicConfig.engineConfig.enableSharedResultTable.toString)
     val outputDir = basicConfig.outputDir
     val reachabilityReport = ReachabilityReportMode
       .parse(basicConfig.engineConfig.enableReachabilityReport)

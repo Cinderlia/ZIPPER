@@ -7,7 +7,7 @@ import bee.zipper.core.analysis.taint.sourcesink.*
 import bee.zipper.core.analysis.vsa.ValueSetResult
 import bee.zipper.core.semantic.SemanticsGenerator
 import io.joern.dataflowengineoss.language.*
-import io.joern.dataflowengineoss.queryengine.{EngineConfig, EngineContext}
+import io.joern.dataflowengineoss.queryengine.{EngineConfig, EngineContext, TableEntry, TaskFingerprint}
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.CfgNode
 import io.shiftleft.semanticcpg.language.*
@@ -70,6 +70,12 @@ class DefaultTaintAnalysis(
     heartbeat.setDaemon(true)
     heartbeat.start()
 
+    // optional reusable result table: engine results computed for one probe are reused by later probes
+    val sharedTable =
+      if (java.lang.Boolean.getBoolean("zipper.taint.sharedTable"))
+        Some(scala.collection.mutable.Map.empty[TaskFingerprint, List[TableEntry]])
+      else None
+
     // iterate over each vulnerability kind and its associated sinks to compute taint paths.
     val paths = kindToSinks.iterator.flatMap { case (kind, taintSinks) =>
       val extractedSinks = extractSinks(taintSinks)
@@ -89,7 +95,8 @@ class DefaultTaintAnalysis(
       var prunedCandidates = 0
       var prunedMs         = 0L
       val probeResults = extractedSinks.probes.zipWithIndex.map { case (probe, index) =>
-        val probeStart    = System.currentTimeMillis()
+        implicit val probeContext: EngineContext = context.copy(config = context.config.copy(sharedTable = sharedTable))
+        val probeStart                           = System.currentTimeMillis()
         val probeLocation = s"${probe.file.headOption.map(_.name).getOrElse("?")}:${probe.lineNumber.getOrElse(-1)}"
         val constantOnly  = pruner.exists(_.isConstantOnly(probe))
         if (constantOnly) prunedCandidates += 1

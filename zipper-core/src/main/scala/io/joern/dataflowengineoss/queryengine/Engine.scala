@@ -49,6 +49,12 @@ class Engine(context: EngineContext) {
       logger.info("Attempting to determine flows to empty list of sinks.")
     }
     reset()
+    // ZIPPER Modified [Begin] - seed the result table from a previous engine call
+    context.config.sharedTable.foreach { shared =>
+      mainResultTable ++= shared
+      started ++= shared.keys
+    }
+    // ZIPPER Modified [End]
     val sourcesSet = sources.toSet
     val tasks      = createOneTaskPerSink(sinks)
     solveTasks(tasks, sourcesSet, sinks)
@@ -120,6 +126,12 @@ class Engine(context: EngineContext) {
     )
     // ZIPPER Modified [Begin] - pass `context` argument
     new HeldTaskCompletion(held.toList, mainResultTable, context).completeHeldTasks()
+    // ZIPPER Modified [End]
+    // ZIPPER Modified [Begin] - publish the result table for later engine calls
+    context.config.sharedTable.foreach { shared =>
+      shared.clear()
+      shared ++= mainResultTable
+    }
     // ZIPPER Modified [End]
     val dedupResult          = extractResultsFromTable(sinks)
     val allDoneTimeSec: Long = System.currentTimeMillis / 1000
@@ -326,7 +338,10 @@ case class EngineConfig(
   maxOutputArgsExpansion: Int = 1000,
   strict: Boolean = true,
   exploitMode: Boolean = false,
-  aliasFinder: Option[AliasFinder] = None
+  aliasFinder: Option[AliasFinder] = None,
+  // ZIPPER Modified [Begin] - reusable result table across engine calls (e.g. across probes)
+  sharedTable: Option[mutable.Map[TaskFingerprint, List[TableEntry]]] = None
+  // ZIPPER Modified [End]
 )
 // ZIPPER Modified [End]
 
