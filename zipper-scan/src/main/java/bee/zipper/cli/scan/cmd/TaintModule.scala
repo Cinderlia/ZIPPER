@@ -268,9 +268,11 @@ object TaintResult {
   implicit val clusterEncoder: Encoder[Cluster]             = deriveEncoder
   implicit val summaryEncoder: Encoder[AnalysisSummary]     = deriveEncoder
 
-  implicit val sliceSourceEncoder: Encoder[SliceSource] = deriveEncoder
-  implicit val sliceNodeEncoder: Encoder[SliceNode]     = deriveEncoder
-  implicit val taintSliceEncoder: Encoder[TaintSlice]   = deriveEncoder
+  implicit val sqlProbeCandidateEncoder: Encoder[SqlProbeCandidate] = deriveEncoder
+  implicit val sqlProbeEncoder: Encoder[SqlProbe]                   = deriveEncoder
+  implicit val sliceSourceEncoder: Encoder[SliceSource]             = deriveEncoder
+  implicit val sliceNodeEncoder: Encoder[SliceNode]                 = deriveEncoder
+  implicit val taintSliceEncoder: Encoder[TaintSlice]               = deriveEncoder
 
   case class SliceSummary(sliceSize: Int, slices: Seq[TaintSlice])
   implicit val sliceSummaryEncoder: Encoder[SliceSummary] = deriveEncoder

@@ -17,6 +17,7 @@ case class TaintSlice(
   sinkFile: String,
   sinkLine: Int,
   sinkCode: String,
+  sqlProbe: Option[SqlProbe],
   sources: List[SliceSource],
   nodeCount: Int,
   nodes: List[SliceNode],
@@ -175,7 +176,11 @@ object TaintSliceBuilder {
   import TaintSliceSupport.*
 
   /** One slice per sink: complete source lines, one entry per line, and the paths' real sources. */
-  def build(paths: List[TaintPath], sources: Set[CfgNode]): List[TaintSlice] = {
+  def build(
+    paths: List[TaintPath],
+    sources: Set[CfgNode],
+    probeSelector: Option[SqlProbeSelector] = None
+  ): List[TaintSlice] = {
     val sourceIds = sources.map(_.id())
     paths
       .filter(_.path.size > 1)
@@ -193,6 +198,7 @@ object TaintSliceBuilder {
           sinkLine = lineOf(sink),
           sinkCode = displayCode(sink),
           sources = srcNodes.map(node => SliceSource(fileOf(node), lineOf(node), displayCode(node), param(node.code))),
+          sqlProbe = probeSelector.flatMap(_.select(group)),
           nodeCount = nodes.size,
           nodes = nodes.map(node => SliceNode(fileOf(node), lineOf(node), displayCode(node))),
           pathCount = group.size

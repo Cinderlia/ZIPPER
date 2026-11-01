@@ -132,7 +132,7 @@ class DefaultTaintAnalysis(
     val pathList = prunedPaths.map { path =>
       if (path.path.exists(node => UnresolvedCallRegistry.contains(node.id()))) path.copy(unresolved = true) else path
     }.toList
-    val slices = TaintSliceBuilder.build(pathList, taintSourceNodes)
+    val slices = TaintSliceBuilder.build(pathList, taintSourceNodes, Some(new SqlProbeSelector))
     val flows  = CompactFlowBuilder.build(pathList, taintSourceNodes)
     val graphs = SinkGraphBuilder.build(pathList, taintSourceNodes)
     TaintAnalysisResult(pathList.iterator, context.newDataflowEdges, slices, flows, graphs)

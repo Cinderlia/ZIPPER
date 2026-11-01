@@ -10,6 +10,7 @@ import bee.zipper.core.analysis.taint.{
   DefaultTaintAnalysis,
   PathChainMerger,
   SinkGraphBuilder,
+  SqlProbeSelector,
   TaintPath,
   TaintSliceBuilder
 }
@@ -287,7 +288,15 @@ object NaviAnalysis {
           byHead.getOrElse(nodeKey(last), Nil) ++
           // the same statement may end at the outer call (get_row) but start at the inner one (prepare)
           byHead.getOrElse(lineKey(last), Nil)
-      tails.map(tail => TaintPath(tail.kind, order = true, prefix.path ++ tail.path.drop(1), Some(tail.sink)))
+      tails.map(tail =>
+        TaintPath(
+          tail.kind,
+          order = true,
+          prefix.path ++ tail.path.drop(1),
+          Some(tail.sink),
+          middleNode = Some(tail.path.head)
+        )
+      )
     }
 
     // WordPress bridge: a database row is copied into an object field dynamically (`$this->$key = $value`), so the
@@ -330,7 +339,15 @@ object NaviAnalysis {
       .groupBy(_.path.head.id())
       .values
       .map(_.minBy(_.path.size))
-      .map(prefix => TaintPath(suffix.kind, order = true, prefix.path ++ suffix.path, Some(suffix.sink)))
+      .map(prefix =>
+        TaintPath(
+          suffix.kind,
+          order = true,
+          prefix.path ++ suffix.path,
+          Some(suffix.sink),
+          middleNode = Some(prefix.path.last)
+        )
+      )
       .toList
 
   private def lineKey(node: CfgNode): (String, Int) =
@@ -347,7 +364,7 @@ object NaviAnalysis {
     try stream.println(TaintResult.renderSummary(summary))
     finally stream.close()
 
-    val slices       = TaintSliceBuilder.build(paths, sources.toSet)
+    val slices       = TaintSliceBuilder.build(paths, sources.toSet, Some(new SqlProbeSelector))
     val slicesStream = new PrintStream(new FileOutputStream(Paths.get(dir, "taint-analysis-slices.json").toFile))
     try slicesStream.println(TaintResult.renderSlices(slices))
     finally slicesStream.close()
