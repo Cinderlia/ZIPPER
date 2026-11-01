@@ -107,6 +107,10 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
 
   def markTainted(nodes: Iterable[CfgNode]): Unit = nodes.foreach(node => knownTainted += node.id())
 
+  /** All nodes this provenance would add for the control (condition chain of every reached taint head). */
+  def provenanceNodes(control: ControlStructure): Set[Long] =
+    taintHeads(control).flatMap(head => pathToCondition(control, head)).flatten.map(_.id()).toSet
+
   /** Adds, for every control structure of the path, the cached provenance of its condition. */
   def enhance(path: TaintPath): TaintPath = {
     if (path.path.isEmpty) return path

@@ -160,7 +160,16 @@ class DefaultTaintAnalysis(
          paths.flatMap { path =>
            val sink = path.sink
            if (path.path.head.method.id() == sink.method.id() && !cfgReaches(path.path.head, sink)) None
-           else Some(path.copy(path = path.path.filter(node => node.id() == sink.id() || cfgReaches(node, sink))))
+           else {
+             // control structures are not CFG nodes in joern; keep them for the guard analysis below
+             Some(
+               path.copy(path =
+                 path.path.filter(node =>
+                   node.id() == sink.id() || node.isInstanceOf[ControlStructure] || cfgReaches(node, sink)
+                 )
+               )
+             )
+           }
          }).toList
 
     if (traceDeclarations)
@@ -178,6 +187,7 @@ class DefaultTaintAnalysis(
     val pathList = prunedPaths
       .map(PathFeasibility.keepConnected)
       .flatMap(BranchTrimming.trim)
+      .map(path => GuardOptionality(path, taintControlFlowProvenance))
       .map { path =>
         val cleaned = path.copy(path = path.path.filterNot(isDeclaration))
         if (cleaned.path.exists(node => UnresolvedCallRegistry.contains(node.id()))) cleaned.copy(unresolved = true)

@@ -21,7 +21,8 @@ case class TaintSlice(
   sources: List[SliceSource],
   nodeCount: Int,
   nodes: List[SliceNode],
-  pathCount: Int
+  pathCount: Int,
+  optionalGuards: List[String]
 )
 
 /** Compact, LLM-oriented view of one sink reached from one source. */
@@ -35,7 +36,8 @@ case class SinkGraph(
   sink: String,
   params: List[String],
   nodes: List[SinkGraphNode],
-  edges: List[SinkGraphEdge]
+  edges: List[SinkGraphEdge],
+  optionalGuards: List[String]
 )
 
 /** Resolves the complete source line for a (file, line) pair. The project root is passed through the
@@ -206,7 +208,8 @@ object TaintSliceBuilder {
           sqlProbe = probeSelector.flatMap(_.select(group)),
           nodeCount = nodes.size,
           nodes = nodes.map(node => SliceNode(fileOf(node), lineOf(node), displayCode(node))),
-          pathCount = group.size
+          pathCount = group.size,
+          optionalGuards = group.flatMap(_.optionalGuards).distinct.sorted
         )
       }
       .sortBy(slice => (slice.sinkFile, slice.sinkLine))
@@ -374,7 +377,8 @@ object SinkGraphBuilder {
           sink = s"${atOf(sink)}  ${displayCode(sink)}",
           params = params,
           nodes = nodes,
-          edges = edges.toList
+          edges = edges.toList,
+          optionalGuards = group.flatMap(_.optionalGuards).distinct.sorted
         )
       }
       .sortBy(graph => graph.sink)

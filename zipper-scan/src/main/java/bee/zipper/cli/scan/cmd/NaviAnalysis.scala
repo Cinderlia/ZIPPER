@@ -298,7 +298,9 @@ object NaviAnalysis {
           order = true,
           prefix.path ++ tail.path.drop(1),
           Some(tail.sink),
-          middleNode = Some(tail.path.head)
+          middleNode = Some(tail.path.head),
+          dataflowNodes = prefix.dataflowNodes ++ tail.dataflowNodes,
+          optionalGuards = (prefix.optionalGuards ++ tail.optionalGuards).distinct
         )
       )
     }
@@ -349,7 +351,9 @@ object NaviAnalysis {
           order = true,
           prefix.path ++ suffix.path,
           Some(suffix.sink),
-          middleNode = Some(prefix.path.last)
+          middleNode = Some(prefix.path.last),
+          dataflowNodes = prefix.dataflowNodes ++ suffix.dataflowNodes,
+          optionalGuards = (prefix.optionalGuards ++ suffix.optionalGuards).distinct
         )
       )
       .toList
