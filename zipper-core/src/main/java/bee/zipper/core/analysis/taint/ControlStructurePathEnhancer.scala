@@ -9,19 +9,14 @@ import scala.collection.mutable
 
 /** Adds control structures that affect a taint path or depend on its tainted values. */
 final class ControlStructurePathEnhancer {
-  private val logger = org.slf4j.LoggerFactory.getLogger(this.getClass)
 
   private val branchCache = mutable.Map.empty[Long, Set[Long]]
 
   private def branchNodeIds(control: ControlStructure): Set[Long] =
     branchCache.getOrElseUpdate(control.id(), (control.whenTrue.ast ++ control.whenFalse.ast).map(_.id()).toSet)
 
-  private var segmentCalls: Long      = 0L
-  private var segmentNodesTotal: Long = 0L
-  private var segmentMs: Long         = 0L
   def enhance(path: TaintPath, provenance: TaintControlFlowProvenance): TaintPath = {
     if (path.path.size < 2) return path
-    logger.info(s"[controlflow] enhance path nodes=${path.path.size}")
 
     val taintNodes = path.path.toSet
     // one reverse reachability pass over REACHING_DEF instead of a BFS per segment node
@@ -41,21 +36,7 @@ final class ControlStructurePathEnhancer {
         val segmentPathNodes = path.path.slice(segmentStart, segmentEnd + 1).toSet
         val fromNode         = path.path(segmentStart)
         val toNode           = path.path(segmentEnd)
-        logger.info(
-          s"[controlflow] segment ${fromNode.file.headOption.map(_.name).getOrElse("?")}:${fromNode.lineNumber
-              .getOrElse(-1)}" +
-            s" -> ${toNode.file.headOption.map(_.name).getOrElse("?")}:${toNode.lineNumber.getOrElse(-1)}"
-        )
-        val segmentStarted = System.currentTimeMillis()
-        val segment        = cfgSegment(fromNode, toNode)
-        segmentCalls += 1
-        segmentNodesTotal += segment.nodes.size
-        segmentMs += System.currentTimeMillis() - segmentStarted
-        if (segmentCalls % 50 == 0)
-          logger.info(
-            s"[controlflow] cfgSegment calls=$segmentCalls avgNodes=${segmentNodesTotal / segmentCalls} totalMs=$segmentMs"
-          )
-        logger.info(s"[controlflow] segment nodes=${segment.nodes.size} controls=${segment.controls.size}")
+        val segment          = cfgSegment(fromNode, toNode)
         val relevantControls = segment.controls.filter { control =>
           val branchIds       = branchNodeIds(control)
           val branchPathNodes = segmentPathNodes.filter(node => branchIds.contains(node.id())).toList

@@ -16,8 +16,6 @@ import scala.collection.mutable
   * method also stops the walk: the enhancement never crosses method boundaries.
   */
 final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
-  private val logger = org.slf4j.LoggerFactory.getLogger(this.getClass)
-
   // the backtrack is limited to 16 hops along REACHING_DEF; if no taint mark is met inside them, the condition is
   // considered unaffected
   private val maxDepth = Integer.getInteger("zipper.controlflow.provenance.depth", 16).intValue()
@@ -35,43 +33,10 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
   private val knownTainted = mutable.Set.empty[Long]
   knownTainted ++= taintSources.map(_.id())
 
-  // cache statistics: graphs are keyed by control-structure id and shared by every path that contains it
-  private var lookups: Long      = 0L
-  private var misses: Long       = 0L
-  private var sampledMisses: Int = 0
-  private var lastSampleAt: Long = 0L
-
-  private def graphOf(control: ControlStructure): ControlGraph = {
-    lookups += 1
-    graphs.get(control.id()) match {
-      case Some(graph) => graph
-      case None =>
-        misses += 1
-        val now = System.currentTimeMillis()
-        // sample a few misses, spread over time, together with the live cache table
-        if (sampledMisses < 20 && (sampledMisses < 3 || now - lastSampleAt > 3000)) {
-          sampledMisses += 1
-          lastSampleAt = now
-          logger.info(
-            s"[controlflow] cache miss #$misses ${location(control)} cacheSize=${graphs.size} " +
-              s"tainted=${knownTainted.size} knownKeys=${graphs.keys.take(20).mkString(",")}"
-          )
-        }
-        if (lookups % 200 == 0)
-          logger.info(
-            s"[controlflow] cache lookups=$lookups misses=$misses hitRate=${"%.2f".format((lookups - misses).toDouble / lookups)}"
-          )
-        val graph = buildGraph(control)
-        graphs(control.id()) = graph
-        graph
-    }
-  }
-
-  private def location(control: ControlStructure): String =
-    s"${control.file.headOption.map(_.name).getOrElse("?")}:${control.lineNumber.getOrElse(-1)} ${control.code.take(40)}"
+  private def graphOf(control: ControlStructure): ControlGraph =
+    graphs.getOrElseUpdate(control.id(), buildGraph(control))
 
   private def buildGraph(control: ControlStructure): ControlGraph = {
-    val startedAt      = System.currentTimeMillis()
     val methodId       = control.method.id()
     val conditionNodes = control.condition.ast.collectAll[CfgNode].toList
     val graph = ControlGraph(
@@ -86,8 +51,6 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
     conditionNodes.foreach(node => queue.enqueue((node, 0)))
 
     while (queue.nonEmpty && visited.size < maxNodes) {
-      if (visited.size > 0 && visited.size % 5000 == 0)
-        logger.info(s"[controlflow] backtrack ${location(control)} visited=${visited.size} queue=${queue.size}")
       val (node, depth) = queue.dequeue()
       if (visited.add(node.id())) {
         graph.nodes(node.id()) = node
@@ -105,10 +68,6 @@ final class TaintControlFlowProvenance(taintSources: Set[CfgNode]) {
         }
       }
     }
-    logger.info(
-      s"[controlflow] backtrack ${location(control)} visited=${visited.size} heads=${graph.taintHeads.size} " +
-        s"sources=${graph.sources.size} elapsed=${System.currentTimeMillis() - startedAt}ms"
-    )
     graph
   }
 

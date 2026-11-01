@@ -60,23 +60,6 @@ class DefaultTaintAnalysis(
       )
     }
 
-    // heartbeat so a long engine run is distinguishable from a hang
-    val running   = new java.util.concurrent.atomic.AtomicBoolean(true)
-    val startTime = System.currentTimeMillis()
-    val heartbeat = new Thread(
-      () => {
-        while (running.get()) {
-          try Thread.sleep(30000)
-          catch { case _: InterruptedException => }
-          if (running.get())
-            logger.info(s"[taint] heartbeat elapsed=${(System.currentTimeMillis() - startTime) / 1000}s")
-        }
-      },
-      "taint-heartbeat"
-    )
-    heartbeat.setDaemon(true)
-    heartbeat.start()
-
     // optional reusable result table: engine results computed for one probe are reused by later probes
     val sharedTable =
       if (java.lang.Boolean.getBoolean("zipper.taint.sharedTable"))
@@ -87,71 +70,16 @@ class DefaultTaintAnalysis(
         )
       else None
 
+    val probeContext: EngineContext = context.copy(config = context.config.copy(sharedTable = sharedTable))
+
     // iterate over each vulnerability kind and its associated sinks to compute taint paths.
     val paths = kindToSinks.iterator.flatMap { case (kind, taintSinks) =>
       val extractedSinks = extractSinks(taintSinks)
-      logger.info(
-        s"[taint] kind=$kind sinks=${taintSinks.size} probes=${extractedSinks.probes.size} sources=${sources.size}"
-      )
-      // step1. joern taint engine entrypoint. Probes are searched one by one so slow probes and their outcome are
-      // visible: whether they reached a source and how deep the found paths are.
-      val chunkSize   = Integer.getInteger("zipper.taint.progress.chunk", 8).intValue()
-      val flowStart   = System.currentTimeMillis()
-      val pruneProbes = java.lang.Boolean.getBoolean("zipper.taint.pruneProbes")
-      val logProbes   = java.lang.Boolean.getBoolean("zipper.taint.logProbes")
-      // measurement mode: still run the engine for pruned probes to detect false kills
-      val shadowSkipped    = java.lang.Boolean.getBoolean("zipper.taint.shadowSkipped")
-      val pruner           = if (pruneProbes) Some(new TaintProbePruner(sources.toSet)) else None
-      var skipped          = 0
-      var prunedCandidates = 0
-      var prunedMs         = 0L
-      val probeResults = extractedSinks.probes.zipWithIndex.map { case (probe, index) =>
-        implicit val probeContext: EngineContext = context.copy(config = context.config.copy(sharedTable = sharedTable))
-        val probeStart                           = System.currentTimeMillis()
-        val probeLocation = s"${probe.file.headOption.map(_.name).getOrElse("?")}:${probe.lineNumber.getOrElse(-1)}"
-        val constantOnly  = pruner.exists(_.isConstantOnly(probe))
-        if (constantOnly) prunedCandidates += 1
-        val found = if (constantOnly && !shadowSkipped) {
-          skipped += 1
-          if (logProbes) logger.info(s"[prune] skip kind=$kind $probeLocation constant-only")
-          List.empty
-        } else {
-          Iterator(probe)
-            .reachableByFlows(sources)
-            .map(path => refactorPath(path, extractedSinks.argumentToCall))
-            .toList // refactor paths by appending real sink nodes if needed
-        }
-        val elapsed  = System.currentTimeMillis() - probeStart
-        val maxDepth = if (found.isEmpty) 0 else found.map(_.elements.size).max
-        if (constantOnly && shadowSkipped) {
-          prunedMs += elapsed
-          if (found.nonEmpty)
-            logger.warn(s"[prune] false kill kind=$kind $probeLocation flows=${found.size}")
-        }
-        if (elapsed >= 1000 || found.size > 200) {
-          logger.info(
-            s"[taint] slow probe kind=$kind $probeLocation elapsed=${elapsed}ms flows=${found.size} maxDepth=$maxDepth"
-          )
-        }
-        if (logProbes)
-          logger.info(s"[probe] kind=$kind $probeLocation elapsed=${elapsed}ms flows=${found.size} maxDepth=$maxDepth")
-        if ((index + 1) % chunkSize == 0)
-          logger.info(
-            s"[taint] kind=$kind progress=${index + 1}/${extractedSinks.probes.size} " +
-              s"total=${System.currentTimeMillis() - flowStart}ms"
-          )
-        (found, elapsed, maxDepth)
-      }.toList
-      val flows      = probeResults.flatMap(_._1)
-      val successful = probeResults.filter(_._1.nonEmpty)
-      val avgDepth   = if (successful.isEmpty) 0 else successful.map(_._3).sum / successful.size
-      val maxDepth   = if (successful.isEmpty) 0 else successful.map(_._3).max
-      logger.info(
-        s"[taint] kind=$kind probes=${probeResults.size} ran=${probeResults.size - skipped} skipped=$skipped " +
-          s"prunedCandidates=$prunedCandidates prunedMs=$prunedMs " +
-          s"withFlows=${successful.size} avgDepth=$avgDepth maxDepth=$maxDepth " +
-          s"slowProbes=${probeResults.count(_._2 >= 1000)}"
-      )
+      // step1. joern taint engine entrypoint
+      val flows = extractedSinks.probes
+        .reachableByFlows(sources)(probeContext)
+        .map(path => refactorPath(path, extractedSinks.argumentToCall))
+        .toList // refactor paths by appending real sink nodes if needed
       // step2. remove duplicate flows if exploit mode is disabled
       val deduplicated = if (!exploitMode && enableDeduplicateFlow) DuplicateFlowProcessor.deduplicate(flows) else flows
       // step3. transform joern `Path` into `TaintPath`
@@ -159,7 +87,6 @@ class DefaultTaintAnalysis(
         val nodes = extractCfgNodes(path)
         TaintPath(kind, true, nodes, nodes.lastOption) // record the real sink before enhancement
       }.toList
-      logger.info(s"[taint] kind=$kind taintPaths=${taintPaths.size}")
       // step4. enhance taint paths with the control structures that guard or depend on them
       val enhancedPaths = taintPaths.map { path =>
         if (enableControlStructure) {
@@ -167,7 +94,6 @@ class DefaultTaintAnalysis(
           taintControlFlowProvenance.enhance(selectedControlPath)
         } else path
       }.toList
-      logger.info(s"[taint] kind=$kind enhanced=${enhancedPaths.size}")
       // step5. drop sanitized/invalid taint paths. In control-structure mode the default path filter is
       //        bypassed on purpose: the appended control-flow slices contain guards such as `$x != ""`,
       //        whose comparison calls are configured as type sanitizers and would reject paths that are
@@ -206,8 +132,6 @@ class DefaultTaintAnalysis(
     val pathList = prunedPaths.map { path =>
       if (path.path.exists(node => UnresolvedCallRegistry.contains(node.id()))) path.copy(unresolved = true) else path
     }.toList
-    running.set(false)
-    logger.info(s"[taint] analysis finished elapsed=${(System.currentTimeMillis() - startTime) / 1000}s")
     val slices = TaintSliceBuilder.build(pathList, taintSourceNodes)
     val flows  = CompactFlowBuilder.build(pathList, taintSourceNodes)
     val graphs = SinkGraphBuilder.build(pathList, taintSourceNodes)
