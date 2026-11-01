@@ -35,6 +35,7 @@ class TaintModule extends AppModule {
     System.setProperty("zipper.symbolic.print.depth", basicConfig.engineConfig.symbolicPrintDepth.toString)
     System.setProperty("zipper.source.root", basicConfig.projectConfig.path)
     System.setProperty("zipper.taint.sharedTable", basicConfig.engineConfig.enableSharedResultTable.toString)
+    System.setProperty("zipper.taint.narrowUnresolved", basicConfig.engineConfig.enableNarrowUnresolvedCalls.toString)
     val outputDir = basicConfig.outputDir
     val reachabilityReport = ReachabilityReportMode
       .parse(basicConfig.engineConfig.enableReachabilityReport)
@@ -51,6 +52,10 @@ class TaintModule extends AppModule {
         // Only apply PHP passes when creating a new CPG
         if (!basicConfig.projectConfig.isLoadingCpgMode) {
           CpgGeneration.applyPHPPasses(cpg, api, basicConfig.engineConfig)
+        }
+        if (basicConfig.engineConfig.enableNarrowUnresolvedCalls) {
+          logger.info("Narrowing unresolved calls to argument-to-result flows")
+          new bee.zipper.core.cpgcreation.php.passes.UnresolvedCallFlowPass(cpg).createAndApply()
         }
         val naviPath = basicConfig.engineConfig.customNaviConfig
         if (naviPath != null && naviPath.nonEmpty) {
@@ -299,11 +304,15 @@ object TaintResult {
       Vulnerability(id, kind, source, sink, features, hash, elements)
     }
 
-    val vulns    = paths.zipWithIndex.map { case (p, id) => buildVulnerability(id, p) }
-    val sink     = vulns.head.sink
-    val kind     = vulns.head.kind
-    val features = vulns.flatMap(_.features).distinct
-    val hash     = DigestUtils.md5Hex(s"$sink:$kind")
+    val vulns = paths.zipWithIndex.map { case (p, id) => buildVulnerability(id, p) }
+    val sink  = vulns.head.sink
+    val kind  = vulns.head.kind
+    val unresolved = paths.exists(path =>
+      path.path.exists(node => bee.zipper.core.cpgcreation.php.passes.UnresolvedCallRegistry.contains(node.id()))
+    )
+    val features =
+      (vulns.flatMap(_.features) ++ (if (unresolved) Seq("UnresolvedCall") else Nil)).distinct
+    val hash = DigestUtils.md5Hex(s"$sink:$kind")
 
     Cluster(sink, kind, vulns.size, features, hash, vulns)
   }

@@ -51,8 +51,10 @@ class Engine(context: EngineContext) {
     reset()
     // ZIPPER Modified [Begin] - seed the result table from a previous engine call
     context.config.sharedTable.foreach { shared =>
-      mainResultTable ++= shared
-      started ++= shared.keys
+      shared.entries.foreach { case (fingerprint, entries) =>
+        mainResultTable.put(fingerprint, entries)
+        started.add(fingerprint)
+      }
     }
     // ZIPPER Modified [End]
     val sourcesSet = sources.toSet
@@ -130,7 +132,7 @@ class Engine(context: EngineContext) {
     // ZIPPER Modified [Begin] - publish the result table for later engine calls
     context.config.sharedTable.foreach { shared =>
       shared.clear()
-      shared ++= mainResultTable
+      mainResultTable.foreach { case (fingerprint, entries) => shared.put(fingerprint, entries) }
     }
     // ZIPPER Modified [End]
     val dedupResult          = extractResultsFromTable(sinks)
@@ -340,7 +342,10 @@ case class EngineConfig(
   exploitMode: Boolean = false,
   aliasFinder: Option[AliasFinder] = None,
   // ZIPPER Modified [Begin] - reusable result table across engine calls (e.g. across probes)
-  sharedTable: Option[mutable.Map[TaskFingerprint, List[TableEntry]]] = None
+  sharedTable: Option[SharedResultTable] = None,
+  // ZIPPER Modified [End]
+  // ZIPPER Modified [Begin] - do not expand external/stub callees (their flows come from synthetic edges)
+  narrowUnresolvedCalls: Boolean = false
   // ZIPPER Modified [End]
 )
 // ZIPPER Modified [End]

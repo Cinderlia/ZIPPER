@@ -194,6 +194,12 @@ class EngineConfig {
   var customSinkConfigs: List[String] = new ArrayList[String]()
 
   @CommandLine.Option(
+    names = Array("--narrow-unresolved-calls"),
+    description = Array("Do not expand external/stub callees; their flows come from argument-to-result edges")
+  )
+  var enableNarrowUnresolvedCalls: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--enable-shared-result-table"),
     description = Array("Reuse dataflow engine results across probe searches (same sources and semantics)")
   )

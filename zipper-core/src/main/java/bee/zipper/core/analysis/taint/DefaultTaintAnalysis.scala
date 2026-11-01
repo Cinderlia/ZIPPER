@@ -5,6 +5,7 @@ import bee.zipper.core.analysis.graph.vfg.Vfg
 import bee.zipper.core.analysis.taint.*
 import bee.zipper.core.analysis.taint.sourcesink.*
 import bee.zipper.core.analysis.vsa.ValueSetResult
+import bee.zipper.core.cpgcreation.php.passes.UnresolvedCallRegistry
 import bee.zipper.core.semantic.SemanticsGenerator
 import io.joern.dataflowengineoss.language.*
 import io.joern.dataflowengineoss.queryengine.{EngineConfig, EngineContext, TableEntry, TaskFingerprint}
@@ -49,7 +50,13 @@ class DefaultTaintAnalysis(
       semantic.initialize(cpg)
       EngineContext(
         semantic,
-        EngineConfig(maxArgsToAllow = 3000, strict = strict, exploitMode = exploitMode, aliasFinder = aliasFinder)
+        EngineConfig(
+          maxArgsToAllow = 3000,
+          strict = strict,
+          exploitMode = exploitMode,
+          aliasFinder = aliasFinder,
+          narrowUnresolvedCalls = java.lang.Boolean.getBoolean("zipper.taint.narrowUnresolved")
+        )
       )
     }
 
@@ -73,7 +80,11 @@ class DefaultTaintAnalysis(
     // optional reusable result table: engine results computed for one probe are reused by later probes
     val sharedTable =
       if (java.lang.Boolean.getBoolean("zipper.taint.sharedTable"))
-        Some(scala.collection.mutable.Map.empty[TaskFingerprint, List[TableEntry]])
+        Some(
+          new io.joern.dataflowengineoss.queryengine.SharedResultTable(
+            Integer.getInteger("zipper.taint.sharedTable.max", 200000).intValue()
+          )
+        )
       else None
 
     // iterate over each vulnerability kind and its associated sinks to compute taint paths.
@@ -192,7 +203,9 @@ class DefaultTaintAnalysis(
           else Some(path.copy(path = path.path.filter(node => node.id() == sink.id() || cfgReaches(node, sink))))
         }
 
-    val pathList = prunedPaths.toList
+    val pathList = prunedPaths.map { path =>
+      if (path.path.exists(node => UnresolvedCallRegistry.contains(node.id()))) path.copy(unresolved = true) else path
+    }.toList
     running.set(false)
     logger.info(s"[taint] analysis finished elapsed=${(System.currentTimeMillis() - startTime) / 1000}s")
     val slices = TaintSliceBuilder.build(pathList, taintSourceNodes)

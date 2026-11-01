@@ -161,7 +161,9 @@ class TaskCreator(context: EngineContext) {
             // ZIPPER Modified [Begin]
             else {
               val returnStatements = methodReturn._reachingDefIn.toList.collect { case r: Return => r }
-              if (method.isExternal || method.start.isStub.nonEmpty) {
+              if (context.config.narrowUnresolvedCalls && (method.isExternal || method.start.isStub.nonEmpty)) {
+                Vector.empty
+              } else if (method.isExternal || method.start.isStub.nonEmpty) {
                 val newPath = path
                 (call.receiver.l ++ call.argument.l).map { arg =>
                   val taskStack = result.taskStack :+ TaskFingerprint(arg, result.callSiteStack, callDepth)

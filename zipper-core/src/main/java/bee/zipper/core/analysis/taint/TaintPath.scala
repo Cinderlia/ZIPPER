@@ -5,8 +5,13 @@ import io.shiftleft.codepropertygraph.generated.nodes.CfgNode
 
 /** Represented the taint path from sink to source if `order` is true
   */
-case class TaintPath(kind: String, order: Boolean, path: List[CfgNode], sinkOverride: Option[CfgNode] = None)
-    extends Iterable[CfgNode] {
+case class TaintPath(
+  kind: String,
+  order: Boolean,
+  path: List[CfgNode],
+  sinkOverride: Option[CfgNode] = None,
+  unresolved: Boolean = false
+) extends Iterable[CfgNode] {
   def source: CfgNode = if (order) path.head else path.last
 
   /** The real sink of the path. Control-flow enhancement may append nodes after it, so the sink is recorded explicitly
