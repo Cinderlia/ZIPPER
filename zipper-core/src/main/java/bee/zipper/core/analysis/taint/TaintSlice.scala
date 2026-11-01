@@ -214,20 +214,21 @@ object CompactFlowBuilder {
   import TaintSliceSupport.*
 
   private def significant(node: CfgNode, sourceIds: Set[Long], sinkId: Long): Boolean =
-    node.id() == sinkId || sourceIds.contains(node.id()) || (node match {
-      case _: Method            => false
-      case _: TypeDecl          => false
-      case _: ControlStructure  => true
-      case _: MethodParameterIn => true
-      case call: Call =>
-        !noise(call.code) && (
-          isContentField(call) ||
-            !call.name.startsWith("<operator>.") ||
-            call.name == "<operator>.assignment" ||
-            call.name.contains("concat")
-        )
-      case _ => false
-    })
+    !node.isInstanceOf[Method] && !node.isInstanceOf[TypeDecl] &&
+      (node.id() == sinkId || sourceIds.contains(node.id()) || (node match {
+        case _: Method            => false
+        case _: TypeDecl          => false
+        case _: ControlStructure  => true
+        case _: MethodParameterIn => true
+        case call: Call =>
+          !noise(call.code) && (
+            isContentField(call) ||
+              !call.name.startsWith("<operator>.") ||
+              call.name == "<operator>.assignment" ||
+              call.name.contains("concat")
+          )
+        case _ => false
+      }))
 
   private def stepsOf(path: TaintPath, sourceIds: Set[Long]): List[String] = {
     val seen = mutable.Set.empty[Int]
@@ -276,21 +277,22 @@ object SinkGraphBuilder {
   import TaintSliceSupport.*
 
   private def significant(node: CfgNode, sourceIds: Set[Long], sinkId: Long): Boolean =
-    node.id() == sinkId || sourceIds.contains(node.id()) || (node match {
-      case _: Method            => false
-      case _: TypeDecl          => false
-      case _: ControlStructure  => true
-      case _: MethodParameterIn => true
-      case call: Call =>
-        !noise(call.code) && (
-          isContentField(call) ||
-            !call.name.startsWith("<operator>.") ||
-            call.name == "<operator>.assignment" ||
-            call.name.contains("concat")
-        )
-      case _: MethodReturn => true
-      case _               => false
-    })
+    !node.isInstanceOf[Method] && !node.isInstanceOf[TypeDecl] &&
+      (node.id() == sinkId || sourceIds.contains(node.id()) || (node match {
+        case _: Method            => false
+        case _: TypeDecl          => false
+        case _: ControlStructure  => true
+        case _: MethodParameterIn => true
+        case call: Call =>
+          !noise(call.code) && (
+            isContentField(call) ||
+              !call.name.startsWith("<operator>.") ||
+              call.name == "<operator>.assignment" ||
+              call.name.contains("concat")
+          )
+        case _: MethodReturn => true
+        case _               => false
+      }))
 
   private def edgeKind(segment: List[CfgNode], to: CfgNode): String = {
     def isField(node: CfgNode): Boolean = node match {

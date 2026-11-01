@@ -11,7 +11,8 @@ case class TaintPath(
   path: List[CfgNode],
   sinkOverride: Option[CfgNode] = None,
   unresolved: Boolean = false,
-  middleNode: Option[CfgNode] = None
+  middleNode: Option[CfgNode] = None,
+  dataflowNodes: Set[Long] = Set.empty
 ) extends Iterable[CfgNode] {
   def source: CfgNode = if (order) path.head else path.last
 

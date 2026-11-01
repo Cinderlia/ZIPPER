@@ -97,7 +97,8 @@ class DefaultTaintAnalysis(
       // step3. transform joern `Path` into `TaintPath`
       val taintPaths = deduplicated.map { path =>
         val nodes = extractCfgNodes(path)
-        val taint = TaintPath(kind, true, nodes, nodes.lastOption) // record the real sink before enhancement
+        val taint =
+          TaintPath(kind, true, nodes, nodes.lastOption, dataflowNodes = nodes.map(_.id()).toSet)
         if (traceOrigins) taint.path.foreach(node => logger.info(s"[origin] dataflow ${locationOf(node)}"))
         taint
       }.toList
@@ -156,6 +157,7 @@ class DefaultTaintAnalysis(
         }
 
     val pathList = prunedPaths
+      .map(PathFeasibility.keepConnected)
       .flatMap(BranchTrimming.trim)
       .map { path =>
         val cleaned = path.copy(path = path.path.filterNot(isDeclaration))

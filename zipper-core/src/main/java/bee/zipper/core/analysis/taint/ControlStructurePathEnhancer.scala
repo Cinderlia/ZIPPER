@@ -10,7 +10,8 @@ import scala.collection.mutable
 /** Adds control structures that affect a taint path or depend on its tainted values. */
 final class ControlStructurePathEnhancer {
 
-  private val branchCache = mutable.Map.empty[Long, Set[Long]]
+  private val branchCache  = mutable.Map.empty[Long, Set[Long]]
+  private val segmentCache = mutable.Map.empty[(Long, Long), CfgSegment]
 
   private def branchNodeIds(control: ControlStructure): Set[Long] =
     branchCache.getOrElseUpdate(control.id(), (control.whenTrue.ast ++ control.whenFalse.ast).map(_.id()).toSet)
@@ -80,32 +81,37 @@ final class ControlStructurePathEnhancer {
 
   private case class CfgSegment(nodes: List[CfgNode], controls: List[ControlStructure])
 
-  private def cfgSegment(from: CfgNode, to: CfgNode): CfgSegment = {
+  private def cfgSegment(from: CfgNode, to: CfgNode): CfgSegment =
+    segmentCache.getOrElseUpdate((from.id(), to.id()), computeCfgSegment(from, to))
+
+  private def computeCfgSegment(from: CfgNode, to: CfgNode): CfgSegment = {
     val nodes    = mutable.LinkedHashSet.empty[CfgNode]
     val controls = mutable.LinkedHashSet.empty[ControlStructure]
     val worklist = mutable.Queue(from)
     val visited  = mutable.Set.empty[CfgNode]
+    var reached  = from.id() == to.id()
+    var budget   = 2000
 
     def successors(node: CfgNode): Iterator[CfgNode] = node match {
       case _: MethodParameterIn => node.method.cfgFirst
       case _                    => node.cfgNext
     }
 
-    var budget = 50000
-    while (worklist.nonEmpty && budget > 0) {
+    while (worklist.nonEmpty && budget > 0 && !reached) {
       budget -= 1
       val node = worklist.dequeue()
       if (visited.add(node)) {
         nodes += node
         collectEnclosingControls(node, controls)
-
-        if (node != to) {
-          successors(node).foreach(worklist.enqueue(_))
-        }
+        if (node.id() == to.id()) reached = true
+        else successors(node).foreach(worklist.enqueue)
       }
     }
 
-    CfgSegment(nodes.toList, controls.toList)
+    // the target is not reachable from the start within the budget: do not scan the whole method and do not treat
+    // unrelated controls of that method as part of this segment
+    if (!reached) CfgSegment(Nil, Nil) else CfgSegment(nodes.toList, controls.toList)
+
   }
 
   private def collectEnclosingControls(node: CfgNode, controls: mutable.LinkedHashSet[ControlStructure]): Unit = {
