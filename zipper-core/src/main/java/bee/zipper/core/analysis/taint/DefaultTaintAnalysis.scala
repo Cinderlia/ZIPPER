@@ -44,6 +44,7 @@ class DefaultTaintAnalysis(
   private val implicitTaintEnhancer = new ImplicitTaintEnhancer(emptySinkTracer)
   private val logger                = org.slf4j.LoggerFactory.getLogger(this.getClass)
   private val traceOrigins          = java.lang.Boolean.getBoolean("zipper.taint.traceOrigins")
+  private val traceDeclarations     = java.lang.Boolean.getBoolean("zipper.taint.traceDeclarations")
 
   private def locationOf(node: CfgNode): String =
     s"${node.file.headOption.map(_.name).getOrElse("?")}:${node.lineNumber.getOrElse(-1)}"
@@ -51,7 +52,10 @@ class DefaultTaintAnalysis(
   private def traceAdded(origin: String, before: Set[Long], after: TaintPath): TaintPath = {
     if (traceOrigins)
       after.path.filterNot(node => before.contains(node.id())).foreach { node =>
-        logger.info(s"[origin] $origin ${locationOf(node)} ${node.code.linesIterator.mkString(" ").take(90)}")
+        logger.info(
+          s"[origin] $origin ${node.getClass.getSimpleName} ${locationOf(node)} " +
+            node.code.linesIterator.mkString(" ").take(80)
+        )
       }
     after
   }
@@ -99,7 +103,10 @@ class DefaultTaintAnalysis(
         val nodes = extractCfgNodes(path)
         val taint =
           TaintPath(kind, true, nodes, nodes.lastOption, dataflowNodes = nodes.map(_.id()).toSet)
-        if (traceOrigins) taint.path.foreach(node => logger.info(s"[origin] dataflow ${locationOf(node)}"))
+        if (traceOrigins)
+          taint.path.foreach(node =>
+            logger.info(s"[origin] dataflow ${node.getClass.getSimpleName} ${locationOf(node)}")
+          )
         taint
       }.toList
       // step4. enhance taint paths with the control structures that guard or depend on them
@@ -148,14 +155,26 @@ class DefaultTaintAnalysis(
     // (`$stmt`/`$rows` reused by a second query). Keep only nodes that can precede the sink in the CFG; a path whose
     // source cannot precede the sink in the same method is dropped.
     val prunedPaths =
-      if (!enableControlStructure) paths
-      else
-        paths.flatMap { path =>
-          val sink = path.sink
-          if (path.path.head.method.id() == sink.method.id() && !cfgReaches(path.path.head, sink)) None
-          else Some(path.copy(path = path.path.filter(node => node.id() == sink.id() || cfgReaches(node, sink))))
-        }
+      (if (!enableControlStructure) paths
+       else
+         paths.flatMap { path =>
+           val sink = path.sink
+           if (path.path.head.method.id() == sink.method.id() && !cfgReaches(path.path.head, sink)) None
+           else Some(path.copy(path = path.path.filter(node => node.id() == sink.id() || cfgReaches(node, sink))))
+         }).toList
 
+    if (traceDeclarations)
+      prunedPaths.foreach { path =>
+        path.path.foreach {
+          case parameter: MethodParameterIn =>
+            logger.info(
+              s"[decl] final MethodParameterIn ${locationOf(parameter)} method=${parameter.method.name} code=${parameter.code}"
+            )
+          case node: Method =>
+            logger.info(s"[decl] final Method ${locationOf(node)} ${node.name}")
+          case _ =>
+        }
+      }
     val pathList = prunedPaths
       .map(PathFeasibility.keepConnected)
       .flatMap(BranchTrimming.trim)

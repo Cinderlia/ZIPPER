@@ -129,8 +129,11 @@ private[taint] object TaintSliceSupport {
   def atOf(node: CfgNode): String = s"${fileOf(node)}:${lineOf(node)}"
 
   /** Complete source line when available, otherwise the node code. */
-  def displayCode(node: CfgNode): String =
-    SourceCache.statementAt(fileOf(node), lineOf(node)).getOrElse(node.code)
+  def displayCode(node: CfgNode): String = node match {
+    // parameter nodes live on the `function foo(...)` line; showing that line looks like a declaration
+    case _: MethodParameterIn => s"param ${node.code}"
+    case _                    => SourceCache.statementAt(fileOf(node), lineOf(node)).getOrElse(node.code)
+  }
 
   /** One node per source line: different fragments of the same line collapse into the most representative node. */
   def perLine(nodes: List[CfgNode], sourceIds: Set[Long], sinkId: Long): List[CfgNode] =
