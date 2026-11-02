@@ -82,6 +82,18 @@
           "args": [
             1
           ]
+        },
+        {
+          "name": "readfile",
+          "args": [
+            1
+          ]
+        },
+        {
+          "name": "fpassthru",
+          "args": [
+            1
+          ]
         }
       ],
       "methods": []
