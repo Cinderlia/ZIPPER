@@ -31,7 +31,7 @@ class GlobalVariableDefUseAnalysis(
       pruneICfg(icfg)
       val analysis       = new GlobalVariableReachingDef(icfg, utils, iterations)
       val dataflowResult = analysis.analyze()
-      XReachingDef.toReachingDefResult(icfg, dataflowResult)
+      analysis.toReachingDefResult(dataflowResult)
     }
   }
 

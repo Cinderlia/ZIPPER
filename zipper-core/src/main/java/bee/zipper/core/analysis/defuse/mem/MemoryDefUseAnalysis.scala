@@ -26,8 +26,13 @@ class MemoryDefUseAnalysis(
       analysis.analyze()
     } else {
       val analysis       = new MemoryReachingDef(icfg, utils, iterations)
+      val t0             = System.currentTimeMillis()
       val dataflowResult = analysis.analyze()
-      XReachingDef.toReachingDefResult(icfg, dataflowResult)
+      println(s"[memorydefuse] reaching-def dataflow finished in ${System.currentTimeMillis() - t0}ms")
+      val t1 = System.currentTimeMillis()
+      val r  = analysis.toReachingDefResult(dataflowResult)
+      println(s"[memorydefuse] reaching-def result materialized in ${System.currentTimeMillis() - t1}ms")
+      r
     }
   }
 

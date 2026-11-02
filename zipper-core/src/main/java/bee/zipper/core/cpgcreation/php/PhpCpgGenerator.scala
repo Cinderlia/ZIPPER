@@ -19,7 +19,7 @@ import io.shiftleft.passes.CpgPassBase
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
 import org.slf4j.LoggerFactory
 
-import java.nio.file.Paths
+import java.nio.file.{Files, Path, Paths}
 
 class PhpCpgGenerator(
   val input: String,
@@ -31,9 +31,11 @@ class PhpCpgGenerator(
     val config = Php2CpgConfig(phpParserBin = Some(parserBin))
     config.inputPath = input
     config.ignoredFiles = {
-      val root  = Paths.get(input)
+      val root  = Paths.get(input).toAbsolutePath.normalize
       val absOf = (p: String) => root.resolve(p).toAbsolutePath.toString
-      excludeDirs.map(absOf) ++ excludeFiles.map(absOf)
+      // `--exclude-dirs=vendor` must also drop nested directories such as `tools/syndication/vendor`,
+      // otherwise third-party code is still parsed and analyzed.
+      PhpCpgGenerator.expandExcludedDirs(root, excludeDirs) ++ excludeFiles.map(absOf)
     }
     output match {
       case Some(value) => config.outputPath = value
@@ -66,6 +68,37 @@ object PhpCpgGenerator {
   private lazy val phpParser: PhpParser = {
     val config = Php2CpgConfig(phpParserBin = Some(parserBin))
     PhpParser.getParser(config).get
+  }
+
+  /** Expand the `--exclude-dirs` values into absolute directory paths.
+    *
+    * A value that contains a path separator is resolved relative to `root` (the previous behaviour). A bare directory
+    * name such as `vendor` is matched against the name of every directory below `root`, so nested vendor directories
+    * like `tools/syndication/vendor` are excluded as well.
+    */
+  private def expandExcludedDirs(root: Path, dirs: Seq[String]): Seq[String] = {
+    dirs.flatMap { dir =>
+      val hasSeparator = dir.contains('/') || dir.contains('\\')
+      if (hasSeparator) Seq(root.resolve(dir).toAbsolutePath.toString)
+      else {
+        val matched = PhpCpgGenerator.collectDirectoriesNamed(root, dir)
+        if (matched.isEmpty) Seq(root.resolve(dir).toAbsolutePath.toString) else matched
+      }
+    }
+  }
+
+  private def collectDirectoriesNamed(root: Path, name: String): Seq[String] = {
+    if (!Files.isDirectory(root)) Seq.empty
+    else {
+      val result = scala.collection.mutable.ArrayBuffer.empty[String]
+      val stream = Files.walk(root)
+      try {
+        stream
+          .filter(path => Files.isDirectory(path) && path.getFileName.toString == name)
+          .forEach(path => result += path.toAbsolutePath.toString)
+      } finally stream.close()
+      result.toSeq
+    }
   }
 
   def runDataFlowLayer(cpg: Cpg): Unit = {

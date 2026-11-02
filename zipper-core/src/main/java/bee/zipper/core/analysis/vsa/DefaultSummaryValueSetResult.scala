@@ -42,6 +42,9 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
   private val cache2        = MemoryCache.mk[(CacheKey, Boolean), Result]
   private val constantTable = buildConstantTable()
 
+  /** Verbose logging of the points-to evaluation (per query) is very expensive on large programs, so it is opt-in. */
+  private val verbose = java.lang.Boolean.getBoolean("zipper.vsa.verbose")
+
   /** The evaluation environment
     * @param m
     *   the method containing [[bb]]
@@ -139,7 +142,7 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
           }
         }
       )
-      logger.info(s"ptsOf(`${location(node, v)}`) = ${renderPointsTo(pts)}")
+      if (verbose) logger.info(s"ptsOf(`${location(node, v)}`) = ${renderPointsTo(pts)}")
       pts
     } catch {
       case _: IllegalStateException =>
@@ -537,22 +540,27 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
 
     def enterCaller(callsite: Call, parameterIndex: Integer): Result = {
       val caller = callsite.method
-      logger.info(s"`ptsOf` enter caller `${caller.name} @ ${caller.filename}` for variable `$name`")
-      (callsite.args.lift(parameterIndex), caller.cfgFirst.headOption) match {
-        case (Some(arg), Some(_)) =>
-          val bbCfg = DefaultBBCfg.create(caller, unrolling = true)
-          val _env = Env(
-            caller,
-            bbCfg,
-            FunSummary.create(caller),
-            bbCfg.bbOf(callsite),
-            env.partialEval,
-            isInitMethod(caller),
-            env.walk,
-            env.pathCallGraph
-          )
-          evalVariable(_env, translate(arg).toString)
-        case _ => (Set.empty, List.empty)
+      // cycle detection: if the caller is already on the current evaluation path, entering it again would only loop
+      if (env.walk.exists(_.m == caller)) {
+        (Set.empty, List.empty)
+      } else {
+        if (verbose) logger.info(s"`ptsOf` enter caller `${caller.name} @ ${caller.filename}` for variable `$name`")
+        (callsite.args.lift(parameterIndex), caller.cfgFirst.headOption) match {
+          case (Some(arg), Some(_)) =>
+            val bbCfg = DefaultBBCfg.create(caller, unrolling = true)
+            val _env = Env(
+              caller,
+              bbCfg,
+              FunSummary.create(caller),
+              bbCfg.bbOf(callsite),
+              env.partialEval,
+              isInitMethod(caller),
+              env.walk,
+              env.pathCallGraph
+            )
+            evalVariable(_env, translate(arg).toString)
+          case _ => (Set.empty, List.empty)
+        }
       }
     }
 

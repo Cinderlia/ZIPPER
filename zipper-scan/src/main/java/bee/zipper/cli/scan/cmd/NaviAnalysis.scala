@@ -62,6 +62,14 @@ object NaviAnalysis {
 
   private val logger = LoggerFactory.getLogger(this.getClass)
 
+  /** `-Dzipper.navi.debug=true` prints the resolved source/sink nodes, to diagnose chain bridging. */
+  private val debug = java.lang.Boolean.getBoolean("zipper.navi.debug")
+
+  private def describe(node: CfgNode): String = {
+    val location = node.file.headOption.map(_.name).getOrElse("?")
+    s"$location:${node.lineNumber.getOrElse(-1)}  ${node.code.take(160).replace('\n', ' ')}"
+  }
+
   /** Fields that carry displayed content: title, body, excerpt and comments. */
   private val wpContentFields: Set[String] = Set(
     "post_title",
@@ -147,6 +155,16 @@ object NaviAnalysis {
       s"navi: default sources=${defaultSources.size}, sql sources=${sqlSources.size}, sink kinds=${allSinks.keys.toList.sorted
           .mkString(",")}"
     )
+    if (debug) {
+      sqlSources.foreach(source => logger.info(s"[navi-debug] sql source: ${describe(source)}"))
+      allSinks.toList.sortBy(_._1).foreach { case (kind, sinks) =>
+        sinks.foreach {
+          case CallArgumentSink(call, _) =>
+            logger.info(s"[navi-debug] sink $kind: ${describe(call)}")
+          case other => logger.info(s"[navi-debug] sink $kind: ${other.toString.take(160)}")
+        }
+      }
+    }
 
     def resolveSources(selector: String): List[CfgNode] =
       selector.trim.toLowerCase match {

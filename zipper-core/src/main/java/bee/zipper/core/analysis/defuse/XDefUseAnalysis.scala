@@ -13,20 +13,20 @@ trait XDefUseAnalysis[V, DefUse <: XDefUse[V]](icfg: DefaultICfg) {
   def solve(): DefUse = {
     import defUse.{defines, useToVar, uses}
 
+    // Iterate over the definitions of the used variable and test whether they reach the statement, instead of
+    // enumerating every reaching definition of the statement (there can be tens of thousands of them on large
+    // programs) and asking which variable each one defines.
     icfg.getNodes.foreach(stmt =>
-      val reachingDefs = reachingDefResult.getReachingDefs(stmt)
-      val useVars      = utils.getUsesOf(stmt)
+      val useVars = utils.getUsesOf(stmt)
       useVars.foreach(useVar =>
-        reachingDefs
+        utils
+          .getDefStmtsOf(useVar)
           .foreach(reachingDef =>
-            val defVars = utils.getDefVarsOf(reachingDef)
-            defVars.foreach(defVar =>
-              if (defVar == useVar) {
-                uses += reachingDef             -> stmt
-                useToVar += (reachingDef, stmt) -> useVar
-                defines += (stmt, useVar)       -> reachingDef
-              }
-            )
+            if (reachingDefResult.reaches(stmt, reachingDef)) {
+              uses += reachingDef             -> stmt
+              useToVar += (reachingDef, stmt) -> useVar
+              defines += (stmt, useVar)       -> reachingDef
+            }
           )
       )
     )

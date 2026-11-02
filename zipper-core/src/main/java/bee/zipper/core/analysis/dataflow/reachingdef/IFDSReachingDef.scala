@@ -21,7 +21,7 @@ class IFDSReachingDef[V](val herosICfg: HerosICfg, val utils: XUtils[V]) {
     pruneICfg()
     solver.solve()
     val map = icfg.getNodes.map(node => node -> solver.ifdsResultsAt(node).asScala.map(_._2).toList).toMap
-    ReachingDefResult(map)
+    ReachingDefResult.fromLists(map)
   }
 
   private def pruneICfg(): Unit = {

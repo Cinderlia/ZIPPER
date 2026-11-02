@@ -40,7 +40,7 @@ class ProjectConfig {
   @CommandLine.Option(
     names = Array("--exclude-dirs"),
     split = ",",
-    description = Array("Exclude directories (comma-separated)")
+    description = Array("Exclude directories (comma-separated; a bare name excludes matching directories at any depth)")
   )
   var excludeDirs: List[String] = new ArrayList[String]()
 
@@ -240,4 +240,14 @@ class EngineConfig {
     description = Array("Only enable specified vulnerability kinds (comma-separated), e.g., Xss,SqlInjection")
   )
   var enabledVulnKinds: List[String] = new ArrayList[String]()
+
+  // Resolve `$x = $services->get(Foo::class)` style service locators so that `$x->m()` links to `Foo::m`
+  @CommandLine.Option(
+    names = Array("--enable-service-locator-type"),
+    description = Array(
+      "Infer the type of service-locator results ($this->getService(Foo::class), $services->get(Foo::class)) " +
+        "and link method calls on them to the service class"
+    )
+  )
+  var enableServiceLocatorType: Boolean = false
 }

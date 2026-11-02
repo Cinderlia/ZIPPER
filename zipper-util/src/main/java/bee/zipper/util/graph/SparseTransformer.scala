@@ -56,11 +56,12 @@ trait SparseTransformer[N, E <: Edge[N]](graph: DefaultGraph[N, E], isMNode: N =
       val outEdges = graph.getOutEdgesOf(w)
       inEdges.foreach { inEdge =>
         edgesToRemove += inEdge
-        newEdges += newNormalEdge(inEdge.from, w)
+        // drop self loops, otherwise the node stays on a cycle and the graph can no longer be topologically sorted
+        if (inEdge.from != w) newEdges += newNormalEdge(inEdge.from, w)
       }
       outEdges.foreach { outEdge =>
         edgesToRemove += outEdge
-        newEdges += newNormalEdge(w, outEdge.to)
+        if (outEdge.to != w) newEdges += newNormalEdge(w, outEdge.to)
       }
     } else {
       scc.foreach(sccNode =>

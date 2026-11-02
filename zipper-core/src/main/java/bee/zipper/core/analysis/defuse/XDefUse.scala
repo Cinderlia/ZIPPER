@@ -30,9 +30,7 @@ trait XDefUse[V] {
   def getDefinesOf(stmt: CfgNode, useVar: V): List[CfgNode] = defines.get((stmt, useVar)).toList
 
   def getReachingDefsOf(ctx: CfgNode, v: V): Set[Call] = {
-    val all  = reachingDefResult.getReachingDefs(ctx).toSet
-    val defs = utils.getDefStmtsOf(v).intersect(all)
-    defs.collect { case x: Call => x }
+    utils.getDefStmtsOf(v).collect { case x: Call if reachingDefResult.reaches(ctx, x) => x }
   }
 
   /** The source part of reaching definitions, e.g. the X of `x = X`

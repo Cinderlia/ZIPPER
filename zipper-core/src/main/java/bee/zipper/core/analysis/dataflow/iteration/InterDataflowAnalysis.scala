@@ -107,6 +107,11 @@ trait InterDataflowAnalysis[Fact] extends Analysis[DataflowResult[Fact]] {
           icfg.getSuccsOf(node).foreach(succ => worklist += succ)
       }
       iterationCount += 1
+      if (java.lang.Boolean.getBoolean("zipper.reachingdef.debug") && (iterationCount % 50 == 0 || worklist.isEmpty)) {
+        val runtime = Runtime.getRuntime
+        val usedMB  = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024
+        println(s"[dataflow] iteration=$iterationCount worklist=${worklist.size} usedMB=$usedMB")
+      }
     }
   }
 
