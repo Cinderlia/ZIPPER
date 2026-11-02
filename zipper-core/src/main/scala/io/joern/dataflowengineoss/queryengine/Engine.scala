@@ -291,7 +291,15 @@ object Engine {
   }
 
   def semanticsForCall(call: Call)(implicit semantics: Semantics): List[FlowSemantic] = {
-    Engine.methodsForCall(call).flatMap(semantics.forMethod)
+    // ZIPPER Modified [Begin] - prefer the semantics of a resolved (internal) callee over the placeholder semantics of
+    // an unresolved stub with the same name. Without this, a call that has both a stub edge and a resolved edge is
+    // treated as "flow stops here" because the stub's name matches a user-defined method, which blocks return-value
+    // propagation even though the callee is known.
+    val called   = Engine.methodsForCall(call)
+    val internal = called.filterNot(_.isExternal)
+    val relevant = if (internal.nonEmpty) internal else called
+    relevant.flatMap(semantics.forMethod)
+    // ZIPPER Modified [End]
   }
 
 }
