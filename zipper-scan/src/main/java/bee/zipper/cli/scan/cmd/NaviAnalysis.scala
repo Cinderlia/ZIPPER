@@ -151,6 +151,22 @@ object NaviAnalysis {
       cpg.call.filter(call => wpObjectField(call).nonEmpty).toList
     val allSinks = TaintSinkSearcher.create(cpg, api.vsa).search()
 
+    // "fileread" seam: calls that read a file's content. Used both as the sink of the
+    // first segment and the source of the second one, so a write/upload stage can be
+    // bridged with a later read stage (second order flows through the file system).
+    val fileReadNames: Set[String] =
+      Set(
+        "fopen",
+        "file_get_contents",
+        "readfile",
+        "fpassthru",
+        "file",
+        "fread",
+        "stream_get_contents",
+        "copyFileInStream"
+      )
+    val fileReadCalls: List[Call] = cpg.call.filter(call => fileReadNames.contains(call.name)).toList
+
     logger.info(
       s"navi: default sources=${defaultSources.size}, sql sources=${sqlSources.size}, sink kinds=${allSinks.keys.toList.sorted
           .mkString(",")}"
@@ -171,6 +187,7 @@ object NaviAnalysis {
         case "default"                                   => defaultSources
         case "sql" | "sqlquery" | "sqlread" | "sql-read" => sqlSources
         case "wpobject" | "wp-object" | "wpobj"          => wpObjectSources
+        case "fileread" | "file-read" | "file_read"      => fileReadCalls
         case other =>
           logger.warn(s"navi: unknown source selector '$other', using default sources")
           defaultSources
@@ -191,7 +208,9 @@ object NaviAnalysis {
         case "sqlread" | "sql-read"   => sqlSinks(SqlStatementKind.Read)
         case "sqlwrite" | "sql-write" => sqlSinks(SqlStatementKind.Write)
         case "sql" | "sqlquery"       => allSinks.filter { case (sinkKind, _) => sinkKind.toLowerCase.contains("sql") }
-        case other                    => allSinks.filter { case (sinkKind, _) => sinkKind.equalsIgnoreCase(other) }
+        case "fileread" | "file-read" | "file_read" =>
+          Map("FileRead" -> fileReadCalls.map(call => CallArgumentSink(call, call.argumentOption(1).toList)))
+        case other => allSinks.filter { case (sinkKind, _) => sinkKind.equalsIgnoreCase(other) }
       }
 
     config.chains.foreach { chain =>
