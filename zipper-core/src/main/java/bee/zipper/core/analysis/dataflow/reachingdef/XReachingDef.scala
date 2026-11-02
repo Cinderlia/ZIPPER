@@ -7,9 +7,20 @@ import io.shiftleft.codepropertygraph.generated.nodes.CfgNode
 
 import scala.collection.mutable
 
-type ReachingDefFact = mutable.BitSet
+/** A set of definition nodes, represented as a bit set indexed by `XReachingDef#rankToNode`.
+  *
+  * `java.util.BitSet` is used instead of `scala.collection.mutable.BitSet` on purpose: the equality of a Scala sorted
+  * set is element-wise (it iterates both sets and compares every element through an `Ordering`), which turns the
+  * fixpoint comparison of two large facts into millions of boxed comparisons. The JDK implementation compares the
+  * backing words and supports word-level union/difference, which is orders of magnitude cheaper on facts holding
+  * thousands of bits.
+  */
+type ReachingDefFact = java.util.BitSet
 
 object XReachingDef {
+
+  /** Immutable empty fact, shared as the default value of the `gen`/`kill` maps. It is never mutated. */
+  private[reachingdef] val EmptyFact: ReachingDefFact = new ReachingDefFact
 
   private def debugStats(
     icfg: DefaultICfg,
@@ -21,7 +32,7 @@ object XReachingDef {
     var max      = 0
     var nonEmpty = 0
     facts.foreach { case (_, fact) =>
-      val size = fact.size
+      val size = fact.cardinality()
       total += size
       if (size > max) max = size
       if (size > 0) nonEmpty += 1
@@ -48,12 +59,19 @@ class XReachingDef[V](val icfg: DefaultICfg, val utils: XUtils[V], val iteration
     val sorted    = icfg.getSortedNodes
     val sortedSet = sorted.toSet
     val unvisited = icfg.getNodes.filterNot(sortedSet.contains).toList
-    (sorted ++ unvisited).toArray
+    // Only statements that actually define a variable can become a member of a reaching-def fact, so the rank space
+    // is restricted to them. Using every sparse node as a potential bit index would keep each BitSet as wide as the
+    // whole program and make the fixed point run out of time and memory on large code bases.
+    (sorted ++ unvisited).filter(node => utils.getDefVarsOf(node).nonEmpty).toArray
   }
   private val nodeToRank: Map[CfgNode, Int] = rankToNode.iterator.zipWithIndex.toMap
+  private val debug                         = java.lang.Boolean.getBoolean("zipper.reachingdef.debug")
+  if (debug) {
+    println(s"[reachingdef] definition nodes=${rankToNode.length} of ${icfg.getNodes.size}")
+  }
 
   // generate the 'gen' and 'kill' set in advance
-  private type ReachingDefMap = Map[CfgNode, mutable.BitSet]
+  private type ReachingDefMap = Map[CfgNode, ReachingDefFact]
   private val gen: ReachingDefMap  = initGen()
   private val kill: ReachingDefMap = initKill(gen)
 
@@ -80,9 +98,17 @@ class XReachingDef[V](val icfg: DefaultICfg, val utils: XUtils[V], val iteration
           "which indicates a residual cycle in the sparse ICFG"
       )
     }
-    if (java.lang.Boolean.getBoolean("zipper.reachingdef.debug")) {
+    if (debug) {
       println(s"[reachingdef] sparse icfg nodes=$nodeSize edges=${icfg.getEdges.size}")
+      val selfLoopNodes = icfg.getNodes.count(n => icfg.getInEdgesOf(n).exists(_.from == n))
+      println(s"[reachingdef] self-loop nodes=$selfLoopNodes")
     }
+  }
+
+  private def factOfRank(rank: Int): ReachingDefFact = {
+    val fact = new ReachingDefFact
+    fact.set(rank)
+    fact
   }
 
   // initialize the 'gen' set for each node in ICFG, representing generated definitions
@@ -91,12 +117,12 @@ class XReachingDef[V](val icfg: DefaultICfg, val utils: XUtils[V], val iteration
       .map(node =>
         val defVars = utils.getDefVarsOf(node)
         val gen =
-          if (defVars.isEmpty) mutable.BitSet.empty // indicate this node is not a definition statement
-          else mutable.BitSet(nodeToRank(node))
+          if (defVars.isEmpty) XReachingDef.EmptyFact // indicate this node is not a definition statement
+          else factOfRank(nodeToRank(node))
         node -> gen
       )
       .toMap
-      .withDefaultValue(mutable.BitSet.empty)
+      .withDefaultValue(XReachingDef.EmptyFact)
   }
 
   // initialize the 'kill' set for each node in ICFG, representing definitions killed by given node
@@ -118,16 +144,36 @@ class XReachingDef[V](val icfg: DefaultICfg, val utils: XUtils[V], val iteration
         .map(nodeToRank)
         .toList
 
-    def killsOf(node: CfgNode): mutable.BitSet = {
-      val kill = mutable.BitSet.empty
-      gen(node).foreach(g => kill ++= definitionsOfSameVariable(rankToNode(g)))
-      kill
+    if (debug) {
+      val defCounts = mutable.Map.empty[V, Int].withDefaultValue(0)
+      icfg.getNodes.foreach(node => utils.getDefVarsOf(node).foreach(v => defCounts(v) += 1))
+      val top       = defCounts.toSeq.sortBy(-_._2).take(5).map { case (v, c) => s"$v -> $c" }.mkString(", ")
+      val totalDefs = defCounts.values.sum
+      println(
+        s"[reachingdef] variables=${defCounts.size} definitionPairs=$totalDefs maxDefsPerVariable=${defCounts.values.maxOption
+            .getOrElse(0)} top=$top"
+      )
+    }
+
+    def killsOf(node: CfgNode): ReachingDefFact = {
+      val genFact = gen(node)
+      if (genFact.isEmpty) {
+        XReachingDef.EmptyFact
+      } else {
+        val kill = new ReachingDefFact
+        var g    = genFact.nextSetBit(0)
+        while (g >= 0) {
+          definitionsOfSameVariable(rankToNode(g)).foreach(kill.set)
+          g = genFact.nextSetBit(g + 1)
+        }
+        kill
+      }
     }
 
     icfg.getNodes
       .map(node => node -> killsOf(node))
       .toMap
-      .withDefaultValue(mutable.BitSet.empty)
+      .withDefaultValue(XReachingDef.EmptyFact)
   }
 
   override def isForward: Boolean = true
@@ -137,15 +183,52 @@ class XReachingDef[V](val icfg: DefaultICfg, val utils: XUtils[V], val iteration
   override def newInitialFact: ReachingDefFact = new ReachingDefFact
 
   override def meetInto(fact: ReachingDefFact, target: ReachingDefFact): Unit = {
-    target ++= fact
+    target.or(fact)
   }
 
   override def transferEdge(edge: ICfgEdge, fact: ReachingDefFact): ReachingDefFact = fact
 
+  private val transferCalls   = new java.util.concurrent.atomic.AtomicLong()
+  private val transferChanges = new java.util.concurrent.atomic.AtomicLong()
+  private val transferStartMs = System.currentTimeMillis()
+
   override def transferNode(node: CfgNode, in: ReachingDefFact, out: ReachingDefFact): Boolean = {
-    val oldOut = out.clone()
-    out.clear()
-    out ++= gen(node).union(in.diff(kill(node)))
-    oldOut != out
+    // `in` and `out` can be the very same object: initializeForward aliases the in-fact of a node with a single
+    // incoming edge to the out-fact of its predecessor, so a node sitting on a self loop ends up with in eq out.
+    // Clearing `out` before reading `in` would then discard the incoming fact, the node would never reach a fixed
+    // point and the solver would keep re-queuing its successors forever. Compute the new fact first, then update
+    // the out-fact in place only when it actually changed.
+    val genFact  = gen(node)
+    val killFact = kill(node)
+    val changed =
+      if (genFact.isEmpty && killFact.isEmpty) {
+        // Most statements do not define anything: the out-fact is simply a copy of the in-fact. Compare directly to
+        // avoid allocating a full copy on every visit.
+        val c = !out.equals(in)
+        if (c) {
+          out.clear()
+          out.or(in)
+        }
+        c
+      } else {
+        val newOut = in.clone().asInstanceOf[ReachingDefFact]
+        newOut.andNot(killFact)
+        newOut.or(genFact)
+        val c = !out.equals(newOut)
+        if (c) {
+          out.clear()
+          out.or(newOut)
+        }
+        c
+      }
+    if (debug) {
+      val calls = transferCalls.incrementAndGet()
+      if (changed) transferChanges.incrementAndGet()
+      if (calls % 200000 == 0) {
+        val elapsed = System.currentTimeMillis() - transferStartMs
+        println(s"[reachingdef] transferNode calls=$calls changed=${transferChanges.get} elapsedMs=$elapsed")
+      }
+    }
+    changed
   }
 }

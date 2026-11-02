@@ -76,13 +76,28 @@ trait InterDataflowAnalysis[Fact] extends Analysis[DataflowResult[Fact]] {
     def order(node: CfgNode): Int = icfg.order(node)
 
     val worklist = mutable.PriorityQueue.empty[CfgNode](Ordering.fromLessThan[CfgNode](order(_) > order(_)))
-    initialNodes.foreach(worklist += _)
+
+    // De-duplicate the worklist. A node is reached from every predecessor that changed in a wave, and processing it
+    // once per predecessor would re-join all of its incoming facts over and over again; on large programs this makes
+    // the cost of high in-degree nodes (such as the sink of the reaching-def analysis) dominate the whole analysis.
+    val queued = mutable.HashSet.empty[CfgNode]
+
+    def enqueue(node: CfgNode): Unit = if (queued.add(node)) worklist += node
+
+    initialNodes.foreach(enqueue)
+
+    // Only re-join a predecessor whose out-fact changed since the previous visit of the current node. The facts of a
+    // monotone analysis only grow, so an unchanged predecessor cannot contribute anything new.
+    val outVersion     = mutable.HashMap.empty[CfgNode, Long]
+    val mergedVersions = mutable.HashMap.empty[CfgNode, mutable.HashMap[CfgNode, Long]]
+    val debug          = java.lang.Boolean.getBoolean("zipper.reachingdef.debug")
 
     var iterationCount = 0
     while (worklist.nonEmpty && (iterations.isEmpty || iterationCount < iterations.get)) {
       val iterationSize = worklist.size
       for (i <- 0 until iterationSize) {
-        val node     = worklist.dequeue()
+        val node = worklist.dequeue()
+        queued -= node
         var in       = result.getInFact(node)
         val inEdges  = icfg.getInEdgesOf(node)
         val inDegree = inEdges.size
@@ -93,21 +108,29 @@ trait InterDataflowAnalysis[Fact] extends Analysis[DataflowResult[Fact]] {
             result.setInFact(node, in)
           }
         } else if (inDegree > 1) {
-          inEdges.foreach(inEdge =>
-            var fact = result.getOutFact(inEdge.from)
+          val merged = mergedVersions.getOrElseUpdate(node, mutable.HashMap.empty[CfgNode, Long])
+          inEdges.foreach { inEdge =>
+            val pred = inEdge.from
             if (needTransferEdge(inEdge)) {
-              fact = transferEdge(inEdge, fact)
+              meetInto(transferEdge(inEdge, result.getOutFact(pred)), in)
+            } else {
+              val version = outVersion.getOrElse(pred, 0L)
+              if (!merged.get(pred).contains(version)) {
+                meetInto(result.getOutFact(pred), in)
+                merged.update(pred, version)
+              }
             }
-            meetInto(fact, in)
-          )
+          }
         }
         val out     = result.getOutFact(node)
         val changed = transferNode(node, in, out)
-        if (changed)
-          icfg.getSuccsOf(node).foreach(succ => worklist += succ)
+        if (changed) {
+          outVersion.update(node, outVersion.getOrElse(node, 0L) + 1L)
+          icfg.getSuccsOf(node).foreach(enqueue)
+        }
       }
       iterationCount += 1
-      if (java.lang.Boolean.getBoolean("zipper.reachingdef.debug") && (iterationCount % 50 == 0 || worklist.isEmpty)) {
+      if (debug && (iterationCount % 50 == 0 || worklist.isEmpty)) {
         val runtime = Runtime.getRuntime
         val usedMB  = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024
         println(s"[dataflow] iteration=$iterationCount worklist=${worklist.size} usedMB=$usedMB")

@@ -20,14 +20,29 @@ class ReachingDefResult(
     */
   def reaches(stmt: CfgNode, definition: CfgNode): Boolean =
     stmtToBits.get(stmt) match {
-      case Some(bits) => nodeToRank.get(definition).exists(bits.contains)
+      case Some(bits) => nodeToRank.get(definition).exists(bits.get)
       case None       => stmtToLists.get(stmt).exists(_.contains(definition))
     }
 
   def getReachingDefs(stmt: CfgNode): Iterator[CfgNode] =
     stmtToBits.get(stmt) match {
-      case Some(bits) => bits.iterator.map(rankToNode)
+      case Some(bits) => bitsToNodes(bits)
       case None       => stmtToLists.getOrElse(stmt, Nil).iterator
+    }
+
+  /** Iterate the nodes whose rank is set in `bits`, in rank order. */
+  private def bitsToNodes(bits: ReachingDefFact): Iterator[CfgNode] =
+    new Iterator[CfgNode] {
+      private var nextRank = bits.nextSetBit(0)
+
+      override def hasNext: Boolean = nextRank >= 0
+
+      override def next(): CfgNode = {
+        if (nextRank < 0) throw new NoSuchElementException("next on empty iterator")
+        val node = rankToNode(nextRank)
+        nextRank = bits.nextSetBit(nextRank + 1)
+        node
+      }
     }
 
   def getReachingDefList(stmt: CfgNode): List[CfgNode] = getReachingDefs(stmt).toList
