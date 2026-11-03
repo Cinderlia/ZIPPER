@@ -50,6 +50,9 @@ class TaintModule extends AppModule {
         if (basicConfig.engineConfig.enableServiceLocatorType) {
           new bee.zipper.core.cpgcreation.php.passes.ServiceLocatorTypePass(cpg).createAndApply()
         }
+        if (basicConfig.engineConfig.enableIncludeScope && basicConfig.projectConfig.isLoadingCpgMode) {
+          new bee.zipper.core.cpgcreation.php.passes.PhpIncludeScopePass(cpg).createAndApply()
+        }
         val projectConfig = basicConfig.projectConfig
         val api           = Api.create(cpg, basicConfig.engineConfig.enhancedValueSetAnalysis)
         // Only apply PHP passes when creating a new CPG

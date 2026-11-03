@@ -250,4 +250,15 @@ class EngineConfig {
     )
   )
   var enableServiceLocatorType: Boolean = false
+
+  // Model `include`/`require` as a shared variable scope: free variables of the included file become parameters of
+  // its `<global>` method and are passed from the include call site
+  @CommandLine.Option(
+    names = Array("--enable-include-scope"),
+    description = Array(
+      "Treat include/require as a shared variable scope: variables defined in the including file flow into the " +
+        "included file and across nested inclusions"
+    )
+  )
+  var enableIncludeScope: Boolean = false
 }

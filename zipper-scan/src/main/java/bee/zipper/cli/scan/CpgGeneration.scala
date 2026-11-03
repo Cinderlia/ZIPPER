@@ -106,6 +106,11 @@ object CpgGeneration {
       )
     }
 
+    if (c.enableIncludeScope) {
+      logger.info("Bridging include/require variable scopes")
+      new PhpIncludeScopePass(cpg).createAndApply()
+    }
+
     if (c.enableGlobalDataDependency) {
       logger.info("Building global variable def-use chains")
       GlobalVariableFlowLayer.run(cpg, api.globalDefUse(lightweight = true))

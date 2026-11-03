@@ -1,6 +1,8 @@
 package bee.zipper.core.analysis.taint
 
 import bee.zipper.core.ir.CpgNodeExtension.*
+
+import scala.collection.mutable
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 
@@ -25,11 +27,31 @@ final class SinkGroupMerger {
     *   one path per straight-line CFG segment
     */
   def merge(paths: List[TaintPath]): List[TaintPath] = {
-    val groups = mutable.LinkedHashMap.empty[(String, Long), mutable.ListBuffer[TaintPath]]
+    val groups = mutable.LinkedHashMap.empty[(String, Long, Int), mutable.ListBuffer[TaintPath]]
     paths.foreach { path =>
-      groups.getOrElseUpdate((path.kind, segmentAnchor(path.sink)), mutable.ListBuffer.empty) += path
+      groups.getOrElseUpdate(branchKey(path), mutable.ListBuffer.empty) += path
     }
     groups.values.map(group => mergeGroup(group.toList)).toList
+  }
+
+  /** Sinks that sit in the same arm of the same control structure are executed together (or not at all), so they form
+    * one sink set. Sinks outside any control structure fall back to the straight-line CFG segment. The third component
+    * distinguishes the two anchor kinds (1 = branch, 0 = segment) without extra allocation.
+    */
+  private def branchKey(path: TaintPath): (String, Long, Int) =
+    enclosingBranch(path.sink) match {
+      case Some((control, arm)) => (path.kind, control.id(), if (arm) 1 else -1)
+      case None                 => (path.kind, segmentAnchor(path.sink), 0)
+    }
+
+  /** The nearest control structure that contains [[sink]] in one of its arms, and which arm it is. */
+  private def enclosingBranch(sink: CfgNode): Option[(ControlStructure, Boolean)] = {
+    val sinkId = sink.id()
+    sink.getClosest[ControlStructure].flatMap { control =>
+      if (control.whenTrue.ast.exists(_.id() == sinkId)) Some((control, true))
+      else if (control.whenFalse.ast.exists(_.id() == sinkId)) Some((control, false))
+      else None
+    }
   }
 
   /** Id of the node that identifies the straight-line CFG segment containing `sink`. */
