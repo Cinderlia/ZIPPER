@@ -1,7 +1,10 @@
 package bee.zipper.core.analysis.taint
 
+import bee.zipper.core.analysis.taint.sourcesink.{SqlStatementClassifier, SqlStatementKind}
+import bee.zipper.core.ir.CpgNodeExtension.*
+import io.shiftleft.semanticcpg.language.*
 import io.joern.dataflowengineoss.language.Path
-import io.shiftleft.codepropertygraph.generated.nodes.CfgNode
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, CfgNode}
 
 /** Represented the taint path from sink to source if `order` is true
   */
@@ -33,4 +36,45 @@ case class TaintPath(
   def prettyPrint: String = {
     Path.show.apply(Path(path))
   }
+}
+
+object TaintPathFilters {
+  private val databaseReadNames = Set(
+    "mysql_fetch_array",
+    "mysqli_fetch_array",
+    "mysql_fetch_assoc",
+    "mysqli_fetch_assoc",
+    "mysql_fetch_row",
+    "mysqli_fetch_row",
+    "mysql_fetch_object",
+    "mysqli_fetch_object",
+    "fetch",
+    "fetchall",
+    "fetch_assoc",
+    "fetch_row",
+    "fetch_array",
+    "fetch_object",
+    "fetchcolumn",
+    "get_row",
+    "get_results",
+    "get_var",
+    "get_col"
+  )
+
+  /** A query-result-to-output relation is indirect for the once-request-to-sink scenarios. */
+  def isDatabaseMediatedRequestFlow(path: TaintPath): Boolean = {
+    val nodes = path.trimmed.path
+    val queryRead = nodes.exists {
+      case call: Call => SqlStatementClassifier.kindOfCall(call).contains(SqlStatementKind.Read)
+      case _          => false
+    }
+    val rowFetch = nodes.exists {
+      case call: Call => databaseReadNames.contains(call.name.toLowerCase)
+      case _          => false
+    }
+    queryRead && rowFetch
+  }
+
+  def isDatabaseMediatedRequestXss(path: TaintPath): Boolean =
+    path.kind.equalsIgnoreCase("Xss") && isDatabaseMediatedRequestFlow(path)
 }

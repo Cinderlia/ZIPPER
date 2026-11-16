@@ -6,6 +6,7 @@ import bee.zipper.cli.scan.cmd.TaintResult.*
 import bee.zipper.core.Api
 import bee.zipper.core.analysis.aliasing.DefaultAliasAnalysis
 import bee.zipper.core.analysis.taint.*
+import bee.zipper.core.analysis.taint.sourcesink.TaintSourceSearcher
 import bee.zipper.core.cpgcreation.php.tagger.*
 import bee.zipper.core.vuln.{SanitizerManager, SourceSinkSpecManager}
 import bee.zipper.util.sys.FileSys
@@ -119,7 +120,8 @@ class TaintModule extends AppModule {
                   cpg,
                   api,
                   reachabilityReport,
-                  directDataflowOnly = true
+                  directDataflowOnly = true,
+                  excludeDbMediatedFlows = true
                 )
                 generateReport(result, scenarioDir, true, reachabilityReport)
               case "second-xss" | "second-sql" =>
@@ -229,7 +231,8 @@ object TaintCmd {
     cpg: Cpg,
     api: Api,
     reachabilityReport: Option[ReachabilityReportCollector] = None,
-    directDataflowOnly: Boolean = false
+    directDataflowOnly: Boolean = false,
+    excludeDbMediatedFlows: Boolean = false
   ): TaintAnalysisResult = {
     val aliasFinder =
       if (c.enableOnDemandAliasAnalysis && !c.enableObjectDataDependency)
@@ -262,6 +265,18 @@ object TaintCmd {
         val reachable = reachability.isReachable(path.path, Some(path.kind))
         !c.enableReachabilityAnalysis || reachable
       })
+    } else if (excludeDbMediatedFlows) {
+      val paths = result.paths.filterNot(TaintPathFilters.isDatabaseMediatedRequestFlow).toList
+      val sources = TaintSourceSearcher
+        .create(cpg, api.vfg, enableIndirectSuperGlobalFetching = c.enableIndirectSuperGlobalFetching)
+        .requestSources()
+        .toSet
+      result.copy(
+        paths = paths.iterator,
+        slices = TaintSliceBuilder.build(paths, sources, Some(new SqlProbeSelector)),
+        flows = CompactFlowBuilder.build(paths, sources),
+        graphs = SinkGraphBuilder.build(paths, sources)
+      )
     } else result
   }
 
