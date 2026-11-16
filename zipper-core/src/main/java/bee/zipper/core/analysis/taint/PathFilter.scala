@@ -205,8 +205,21 @@ class PathFilter(
 
     def isValidNode(node: CfgNode): Boolean = {
       node match {
+        case call: Call
+            if taintPath.kind.equalsIgnoreCase(VulnKind.Xss) &&
+              TaintPathFilters.isReliableXssValueFilter(call.name) =>
+          true
+        case call: Call
+            if taintPath.kind.equalsIgnoreCase(VulnKind.Xss) &&
+              (vulnSanFunNames.contains(call.name) || vulnSanMethods.exists(_.methodName == call.name)) =>
+          // Keep context-dependent XSS encoders in the report; they may be safe in one output context and unsafe in another.
+          true
         case call: Call =>
-          if (typeSanitizerNames.contains(call.name)) return false
+          if (
+            typeSanitizerNames.contains(call.name) &&
+            !(taintPath.kind.equalsIgnoreCase(VulnKind.Xss) && TaintPathFilters.isReliableXssValueFilter(call.name))
+          )
+            return false
           // If in exploit mode, we don't filter out paths containing sanitizers, since the goal is to attempt bypassing them
           if (exploitMode) return true
           val isSanitized =
@@ -227,11 +240,14 @@ class PathFilter(
             verifyConditionalOperator(prev, curr) && {
               if (exploitMode) true
               else {
-                val prefix            = path.takeWhile(_ != curr)
-                val taintedIdx        = inferTaintedArgIndexFromPrefix(prefix, curr)
+                val prefix     = path.takeWhile(_ != curr)
+                val taintedIdx = inferTaintedArgIndexFromPrefix(prefix, curr)
+                val xssSanitizerRetained = taintPath.kind.equalsIgnoreCase(VulnKind.Xss) &&
+                  (TaintPathFilters.isReliableXssValueFilter(curr.name) || vulnSanFunNames.contains(curr.name) ||
+                    vulnSanMethods.exists(_.methodName == curr.name))
                 val isFunSanitized    = isMatchFunSanitizer(curr, taintedIdx)
                 val isMethodSanitized = isMatchMethodSanitizer(curr, taintedIdx)
-                !(isFunSanitized || isMethodSanitized)
+                xssSanitizerRetained || !(isFunSanitized || isMethodSanitized)
               }
             }
           case Seq(prev, curr) => verifyConditionalOperator(prev, curr)

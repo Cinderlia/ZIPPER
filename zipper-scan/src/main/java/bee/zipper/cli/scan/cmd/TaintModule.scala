@@ -123,7 +123,12 @@ class TaintModule extends AppModule {
                   directDataflowOnly = true,
                   excludeDbMediatedFlows = true
                 )
-                generateReport(result, scenarioDir, true, reachabilityReport)
+                generateReport(
+                  TaintCmd.prioritizeReliableXssFilters(result, cpg, api.vfg, basicConfig.engineConfig),
+                  scenarioDir,
+                  true,
+                  reachabilityReport
+                )
               case "second-xss" | "second-sql" =>
                 val config =
                   if (customNaviPath != null && customNaviPath.nonEmpty) {
@@ -223,6 +228,30 @@ class TaintModule extends AppModule {
 /** Shared methods for taint analysis
   */
 object TaintCmd {
+
+  /** Put paths through context-independent XSS value filters after higher-priority paths, preserving every path. */
+  def prioritizeReliableXssFilters(
+    result: TaintAnalysisResult,
+    cpg: Cpg,
+    vfg: bee.zipper.core.analysis.graph.vfg.Vfg,
+    config: EngineConfig
+  ): TaintAnalysisResult = {
+    val paths = result.paths.toList
+    val (lowerPriority, primary) = paths.partition { path =>
+      path.kind.equalsIgnoreCase("Xss") && TaintPathFilters.hasReliableXssValueFilter(path)
+    }
+    val orderedPaths = primary ++ lowerPriority
+    val sources = TaintSourceSearcher
+      .create(cpg, vfg, enableIndirectSuperGlobalFetching = config.enableIndirectSuperGlobalFetching)
+      .requestSources()
+      .toSet
+    result.copy(
+      paths = orderedPaths.iterator,
+      slices = TaintSliceBuilder.build(orderedPaths, sources, Some(new SqlProbeSelector)),
+      flows = CompactFlowBuilder.build(orderedPaths, sources),
+      graphs = SinkGraphBuilder.build(orderedPaths, sources)
+    )
+  }
 
   /** Run STATIC taint analysis
     */
@@ -348,7 +377,8 @@ object TaintResult {
     sink: String,
     features: Seq[String],
     hash: String,
-    path: Seq[PathElement]
+    path: Seq[PathElement],
+    sinkSet: Seq[String] = Seq.empty
   )
 
   case class Cluster(
@@ -357,7 +387,8 @@ object TaintResult {
     vulnSize: Int,
     features: Seq[String],
     hash: String,
-    vulns: Seq[Vulnerability]
+    vulns: Seq[Vulnerability],
+    sinkSet: Seq[String] = Seq.empty
   )
 
   case class AnalysisSummary(clusterSize: Int, allVulns: Int, clusters: Seq[Cluster])
@@ -402,12 +433,24 @@ object TaintResult {
       val source   = elements.head.toString
       val sink     = elements.last.toString
       val hash     = DigestUtils.md5Hex(s"$sink:$kind")
-      Vulnerability(id, kind, source, sink, features, hash, elements)
+      val sinkSet = (if (path.sinkSet.nonEmpty) path.sinkSet else List(path.sink)).map { sinkNode =>
+        val file = sinkNode.file.headOption.map(_.name.replace(File.separator, "/")).getOrElse("")
+        val line = sinkNode.lineNumber.getOrElse(-1)
+        s"$file:$line ${sinkNode.code}"
+      }
+      Vulnerability(id, kind, source, sink, features, hash, elements, sinkSet)
     }
 
     val vulns = paths.zipWithIndex.map { case (p, id) => buildVulnerability(id, p) }
     val sink  = vulns.head.sink
-    val kind  = vulns.head.kind
+    val sinkSet =
+      paths.flatMap(path => if (path.sinkSet.nonEmpty) path.sinkSet else List(path.sink)).distinctBy(_.id()).map {
+        sinkNode =>
+          val file = sinkNode.file.headOption.map(_.name.replace(File.separator, "/")).getOrElse("")
+          val line = sinkNode.lineNumber.getOrElse(-1)
+          s"$file:$line ${sinkNode.code}"
+      }
+    val kind = vulns.head.kind
     val unresolved = paths.exists(path =>
       path.path.exists(node => bee.zipper.core.cpgcreation.php.passes.UnresolvedCallRegistry.contains(node.id()))
     )
@@ -415,7 +458,7 @@ object TaintResult {
       (vulns.flatMap(_.features) ++ (if (unresolved) Seq("UnresolvedCall") else Nil)).distinct
     val hash = DigestUtils.md5Hex(s"$sink:$kind")
 
-    Cluster(sink, kind, vulns.size, features, hash, vulns)
+    Cluster(sink, kind, vulns.size, features, hash, vulns, sinkSet)
   }
 
   def renderSummary(summary: AnalysisSummary): String = Printer.spaces4.print(summary.asJson)

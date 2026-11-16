@@ -2,10 +2,8 @@ package bee.zipper.core.analysis.taint
 
 import bee.zipper.core.ir.CpgNodeExtension.*
 
-import scala.collection.mutable
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
-
 import scala.collection.mutable
 
 /** Merges the paths of sinks that sit on the same straight-line CFG segment.
@@ -27,7 +25,7 @@ final class SinkGroupMerger {
     *   one path per straight-line CFG segment
     */
   def merge(paths: List[TaintPath]): List[TaintPath] = {
-    val groups = mutable.LinkedHashMap.empty[(String, Long, Int), mutable.ListBuffer[TaintPath]]
+    val groups = mutable.LinkedHashMap.empty[(String, Long, String), mutable.ListBuffer[TaintPath]]
     paths.foreach { path =>
       groups.getOrElseUpdate(branchKey(path), mutable.ListBuffer.empty) += path
     }
@@ -38,20 +36,29 @@ final class SinkGroupMerger {
     * one sink set. Sinks outside any control structure fall back to the straight-line CFG segment. The third component
     * distinguishes the two anchor kinds (1 = branch, 0 = segment) without extra allocation.
     */
-  private def branchKey(path: TaintPath): (String, Long, Int) =
-    enclosingBranch(path.sink) match {
-      case Some((control, arm)) => (path.kind, control.id(), if (arm) 1 else -1)
-      case None                 => (path.kind, segmentAnchor(path.sink), 0)
-    }
+  private def branchKey(path: TaintPath): (String, Long, String) = {
+    val controlPath =
+      enclosingBranches(path.sink).map { case (control, arm) => s"${control.id()}:${if (arm) 1 else -1}" }
+    if (controlPath.nonEmpty) (path.kind, path.sink.method.id(), controlPath.mkString("/"))
+    else (path.kind, segmentAnchor(path.sink), "segment")
+  }
 
-  /** The nearest control structure that contains [[sink]] in one of its arms, and which arm it is. */
-  private def enclosingBranch(sink: CfgNode): Option[(ControlStructure, Boolean)] = {
-    val sinkId = sink.id()
-    sink.getClosest[ControlStructure].flatMap { control =>
-      if (control.whenTrue.ast.exists(_.id() == sinkId)) Some((control, true))
-      else if (control.whenFalse.ast.exists(_.id() == sinkId)) Some((control, false))
-      else None
+  /** All enclosing controls and their arms, from nearest to outermost. */
+  private def enclosingBranches(sink: CfgNode): List[(ControlStructure, Boolean)] = {
+    val result           = mutable.ListBuffer.empty[(ControlStructure, Boolean)]
+    var current: AstNode = sink
+    var closest          = current.getClosest[ControlStructure]
+    while (closest.nonEmpty) {
+      val control = closest.get
+      val arm =
+        if (control.whenTrue.ast.exists(_.id() == sink.id())) Some(true)
+        else if (control.whenFalse.ast.exists(_.id() == sink.id())) Some(false)
+        else None
+      arm.foreach(value => result += control -> value)
+      current = control
+      closest = current.getClosest[ControlStructure]
     }
+    result.toList
   }
 
   /** Id of the node that identifies the straight-line CFG segment containing `sink`. */
@@ -95,7 +102,8 @@ final class SinkGroupMerger {
     val backbone = deepest.path.dropRight(1)
     val sinkNode = deepest.path.last
     val extras   = ordered.dropRight(1).flatMap(_.path)
-    deepest.copy(path = distinctNodes(backbone ++ extras ++ List(sinkNode)))
+    val sinkSet  = ordered.map(_.sink).distinctBy(_.id())
+    deepest.copy(path = distinctNodes(backbone ++ extras ++ List(sinkNode)), sinkSet = sinkSet)
   }
 
   private def distinctNodes(nodes: List[CfgNode]): List[CfgNode] = {

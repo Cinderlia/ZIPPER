@@ -16,7 +16,8 @@ case class TaintPath(
   unresolved: Boolean = false,
   middleNode: Option[CfgNode] = None,
   dataflowNodes: Set[Long] = Set.empty,
-  optionalGuards: List[String] = Nil
+  optionalGuards: List[String] = Nil,
+  sinkSet: List[CfgNode] = Nil
 ) extends Iterable[CfgNode] {
   def source: CfgNode = if (order) path.head else path.last
 
@@ -39,6 +40,22 @@ case class TaintPath(
 }
 
 object TaintPathFilters {
+  // Numeric conversion yields a numeric scalar, which is inert when rendered in any XSS output context.
+  // Context-specific HTML/URL encoders are deliberately excluded from this reliability set.
+  private val reliableXssValueFilters = Set("intval", "floatval", "doubleval")
+
+  def isReliableXssValueFilter(name: String): Boolean = reliableXssValueFilters.contains(name.toLowerCase)
+
+  /** True only when a configured numeric conversion consumes a value already on the source-to-sink path. */
+  def hasReliableXssValueFilter(path: TaintPath): Boolean = {
+    val nodes = path.trimmed.path
+    nodes.zipWithIndex.exists {
+      case (call: Call, callIndex) if reliableXssValueFilters.contains(call.name.toLowerCase) =>
+        call.argument.l.exists(arg => nodes.take(callIndex).exists(_.id() == arg.id()))
+      case _ => false
+    }
+  }
+
   private val databaseReadNames = Set(
     "mysql_fetch_array",
     "mysqli_fetch_array",

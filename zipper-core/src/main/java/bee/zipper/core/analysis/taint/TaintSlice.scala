@@ -22,7 +22,8 @@ case class TaintSlice(
   nodeCount: Int,
   nodes: List[SliceNode],
   pathCount: Int,
-  optionalGuards: List[String]
+  optionalGuards: List[String],
+  sinkSet: List[String] = Nil
 )
 
 /** Compact, LLM-oriented view of one sink reached from one source. */
@@ -192,7 +193,7 @@ object TaintSliceBuilder {
     paths
       .filter(_.path.size > 1)
       .map(_.trimmed)
-      .groupBy(path => path.sink.id())
+      .groupBy(path => if (path.sinkSet.nonEmpty) path.sinkSet.map(_.id()).sorted else List(path.sink.id()))
       .values
       .toList
       .map { group =>
@@ -209,7 +210,11 @@ object TaintSliceBuilder {
           nodeCount = nodes.size,
           nodes = nodes.map(node => SliceNode(fileOf(node), lineOf(node), displayCode(node))),
           pathCount = group.size,
-          optionalGuards = group.flatMap(_.optionalGuards).distinct.sorted
+          optionalGuards = group.flatMap(_.optionalGuards).distinct.sorted,
+          sinkSet = group
+            .flatMap(path => if (path.sinkSet.nonEmpty) path.sinkSet else List(path.sink))
+            .distinctBy(_.id())
+            .map(node => s"${fileOf(node)}:${lineOf(node)} ${displayCode(node)}")
         )
       }
       .sortBy(slice => (slice.sinkFile, slice.sinkLine))
@@ -254,7 +259,7 @@ object CompactFlowBuilder {
     paths
       .filter(_.path.size > 1)
       .map(_.trimmed)
-      .groupBy(_.sink.id())
+      .groupBy(path => if (path.sinkSet.nonEmpty) path.sinkSet.map(_.id()).sorted else List(path.sink.id()))
       .values
       .toList
       .flatMap { group =>
@@ -318,7 +323,7 @@ object SinkGraphBuilder {
     paths
       .filter(_.path.size > 1)
       .map(_.trimmed)
-      .groupBy(_.sink.id())
+      .groupBy(path => if (path.sinkSet.nonEmpty) path.sinkSet.map(_.id()).sorted else List(path.sink.id()))
       .values
       .toList
       .map { group =>
