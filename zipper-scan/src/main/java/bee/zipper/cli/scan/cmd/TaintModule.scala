@@ -236,11 +236,7 @@ object TaintCmd {
     vfg: bee.zipper.core.analysis.graph.vfg.Vfg,
     config: EngineConfig
   ): TaintAnalysisResult = {
-    val paths = result.paths.toList
-    val (lowerPriority, primary) = paths.partition { path =>
-      path.kind.equalsIgnoreCase("Xss") && TaintPathFilters.hasReliableXssValueFilter(path)
-    }
-    val orderedPaths = primary ++ lowerPriority
+    val orderedPaths = result.paths.toList
     val sources = TaintSourceSearcher
       .create(cpg, vfg, enableIndirectSuperGlobalFetching = config.enableIndirectSuperGlobalFetching)
       .requestSources()
@@ -333,7 +329,10 @@ object TaintCmd {
 
     val newDataflowEdges = taintAnalysisResult.newDataflowEdges.asScala.map(x => (x._1.code, x._2.code)).toSet
     val clusters =
-      PathChainMerger.merge(taintPaths).map(paths => constructCluster(paths, newDataflowEdges))
+      PathChainMerger
+        .merge(taintPaths)
+        .map(paths => constructCluster(paths, newDataflowEdges))
+        .sortBy(cluster => if (cluster.vulns.exists(_.reviewPriority == "review-later")) 1 else 0)
     val summary = AnalysisSummary(clusters.size, vulnCount, clusters)
     jsonStream.println(renderSummary(summary))
     jsonStream.flush()
@@ -378,7 +377,9 @@ object TaintResult {
     features: Seq[String],
     hash: String,
     path: Seq[PathElement],
-    sinkSet: Seq[String] = Seq.empty
+    sinkSet: Seq[String] = Seq.empty,
+    reviewPriority: String = "normal",
+    deprioritizedBy: Seq[String] = Seq.empty
   )
 
   case class Cluster(
@@ -438,7 +439,10 @@ object TaintResult {
         val line = sinkNode.lineNumber.getOrElse(-1)
         s"$file:$line ${sinkNode.code}"
       }
-      Vulnerability(id, kind, source, sink, features, hash, elements, sinkSet)
+      val deprioritizedBy =
+        if (kind.equalsIgnoreCase("Xss")) TaintPathFilters.deprioritizingXssSanitizers(path) else Nil
+      val reviewPriority = if (deprioritizedBy.nonEmpty) "review-later" else "normal"
+      Vulnerability(id, kind, source, sink, features, hash, elements, sinkSet, reviewPriority, deprioritizedBy)
     }
 
     val vulns = paths.zipWithIndex.map { case (p, id) => buildVulnerability(id, p) }

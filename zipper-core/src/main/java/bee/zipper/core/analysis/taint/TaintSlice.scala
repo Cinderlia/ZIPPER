@@ -23,7 +23,9 @@ case class TaintSlice(
   nodes: List[SliceNode],
   pathCount: Int,
   optionalGuards: List[String],
-  sinkSet: List[String] = Nil
+  sinkSet: List[String] = Nil,
+  reviewPriority: String = "normal",
+  deprioritizedBy: List[String] = Nil
 )
 
 /** Compact, LLM-oriented view of one sink reached from one source. */
@@ -214,7 +216,16 @@ object TaintSliceBuilder {
           sinkSet = group
             .flatMap(path => if (path.sinkSet.nonEmpty) path.sinkSet else List(path.sink))
             .distinctBy(_.id())
-            .map(node => s"${fileOf(node)}:${lineOf(node)} ${displayCode(node)}")
+            .map(node => s"${fileOf(node)}:${lineOf(node)} ${displayCode(node)}"),
+          deprioritizedBy = group.flatMap(path => TaintPathFilters.deprioritizingXssSanitizers(path)).distinct.sorted,
+          reviewPriority =
+            if (
+              group.exists(path =>
+                path.kind.equalsIgnoreCase("Xss") && TaintPathFilters.hasDeprioritizingXssSanitizer(path)
+              )
+            )
+              "review-later"
+            else "normal"
         )
       }
       .sortBy(slice => (slice.sinkFile, slice.sinkLine))

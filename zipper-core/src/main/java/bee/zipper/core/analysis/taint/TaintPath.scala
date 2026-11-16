@@ -46,15 +46,25 @@ object TaintPathFilters {
 
   def isReliableXssValueFilter(name: String): Boolean = reliableXssValueFilters.contains(name.toLowerCase)
 
-  /** True only when a configured numeric conversion consumes a value already on the source-to-sink path. */
-  def hasReliableXssValueFilter(path: TaintPath): Boolean = {
+  private val reviewOnlyXssEncoders = Set("htmlspecialchars", "htmlentities", "strip_tags", "rawurlencode", "urlencode")
+
+  /** Encoders recognized on-path when they consume a value already on the source-to-sink path. */
+  def deprioritizingXssSanitizers(path: TaintPath): List[String] = {
     val nodes = path.trimmed.path
-    nodes.zipWithIndex.exists {
-      case (call: Call, callIndex) if reliableXssValueFilters.contains(call.name.toLowerCase) =>
-        call.argument.l.exists(arg => nodes.take(callIndex).exists(_.id() == arg.id()))
-      case _ => false
-    }
+    nodes.zipWithIndex
+      .collect {
+        case (call: Call, callIndex)
+            if (reliableXssValueFilters.contains(call.name.toLowerCase) ||
+              reviewOnlyXssEncoders.contains(call.name.toLowerCase)) &&
+              call.argument.l.exists(arg => nodes.take(callIndex).exists(_.id() == arg.id())) =>
+          call.name.toLowerCase
+      }
+      .distinct
+      .sorted
   }
+
+  def hasDeprioritizingXssSanitizer(path: TaintPath): Boolean =
+    deprioritizingXssSanitizers(path).nonEmpty
 
   private val databaseReadNames = Set(
     "mysql_fetch_array",
