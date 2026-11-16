@@ -14,7 +14,7 @@ object PHPJoernTaintAnalysis {
     val sources = {
       val searcher =
         TaintSourceSearcher.create(cpg, vfg, enableWrapperFinder = false, enableIndirectSuperGlobalFetching = false)
-      searcher.search()._1
+      searcher.requestSources()
     }
     val sinks = {
       val searcher = TaintSinkSearcher.create(cpg, vsa)

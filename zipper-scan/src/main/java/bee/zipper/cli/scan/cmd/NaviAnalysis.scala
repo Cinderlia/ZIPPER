@@ -136,17 +136,23 @@ object NaviAnalysis {
         .headOption
     }
 
-  def run(config: NaviConfig, cpg: Cpg, api: Api, c: EngineConfig, outputDir: String): Unit = {
+  def run(
+    config: NaviConfig,
+    cpg: Cpg,
+    api: Api,
+    c: EngineConfig,
+    outputDir: String,
+    enableNaviControlFlow: Boolean = true
+  ): Unit = {
     val sourceSearcher = TaintSourceSearcher.create(
       cpg,
       api.vfg,
       enableWrapperFinder = false,
       enableIndirectSuperGlobalFetching = c.enableIndirectSuperGlobalFetching
     )
-    val (allSources, _) = sourceSearcher.search()
-    val sqlSources      = sourceSearcher.sqlQuerySources()
-    val sqlSourceIds    = sqlSources.map(_.id()).toSet
-    val defaultSources  = allSources.filterNot(source => sqlSourceIds.contains(source.id()))
+    val allSources     = sourceSearcher.requestSources()
+    val sqlSources     = sourceSearcher.sqlQuerySources()
+    val defaultSources = allSources
     val wpObjectSources: List[CfgNode] =
       cpg.call.filter(call => wpObjectField(call).nonEmpty).toList
     val allSinks = TaintSinkSearcher.create(cpg, api.vsa).search()
@@ -226,7 +232,17 @@ object NaviAnalysis {
               s"navi[${chain.name}] segment ${index + 1}: empty sources or sinks (sources=${sources.size}, sinks=$sinkCount)"
             )
             List.empty[TaintPath]
-          } else analyzeSegment(cpg, sources, sinks, api, c, includeUntaintedSinks = index < chain.segments.size - 1)
+          } else
+            analyzeSegment(
+              cpg,
+              sources,
+              sinks,
+              api,
+              c,
+              enableControlStructure =
+                enableNaviControlFlow && c.enableControlStructure && index < chain.segments.size - 1,
+              includeUntaintedSinks = enableNaviControlFlow && index < chain.segments.size - 1
+            )
         val label = segment.name.getOrElse(s"segment-${index + 1}")
         writeReport(paths, chainDir.resolve(s"${index + 1}-$label").toString, sources)
         logger.info(s"navi[${chain.name}] ${segment.source} -> ${segment.sink}: ${paths.size} paths")
@@ -278,6 +294,7 @@ object NaviAnalysis {
     sinks: Map[String, List[TaintSink]],
     api: Api,
     c: EngineConfig,
+    enableControlStructure: Boolean,
     includeUntaintedSinks: Boolean
   ): List[TaintPath] = {
     val aliasFinder =
@@ -297,8 +314,8 @@ object NaviAnalysis {
       enableCustomSanitizer = c.enableCustomSanitizer,
       enableKeywordMatching = c.enableSanitizerKeywordMatching,
       aliasFinder = aliasFinder,
-      enableControlStructure = c.enableControlStructure,
-      enableImplicitTaint = c.enableImplicitTaint,
+      enableControlStructure = enableControlStructure,
+      enableImplicitTaint = enableControlStructure && c.enableImplicitTaint,
       includeUntaintedSinks = includeUntaintedSinks
     )
     val result = analysis.analyze().paths.toList

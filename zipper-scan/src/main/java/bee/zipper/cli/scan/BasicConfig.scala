@@ -65,6 +65,15 @@ class ProjectConfig {
 }
 
 class EngineConfig {
+  @CommandLine.Option(
+    names = Array("--scan-scenarios"),
+    split = ",",
+    description = Array(
+      "Scan scenarios: once-xss,once-sql,second-xss,second-sql,second-injection (comma-separated; default: all when enabled)"
+    )
+  )
+  var scanScenarios: List[String] = null
+
   // value inference
   @CommandLine.Option(
     names = Array("--disable-enhanced-vsa"),

@@ -20,12 +20,30 @@ import picocli.CommandLine.{Command, Mixin}
 
 import java.io.{File, FileOutputStream, PrintStream}
 import java.nio.file.Paths
+import scala.jdk.CollectionConverters.*
 
 @Command(description = Array("Static taint analysis for PHP"))
 class TaintModule extends AppModule {
   override def name: String = "taint"
 
   private val logger = LoggerFactory.getLogger(this.getClass)
+
+  private def secondOrderConfig(finalSink: String): NaviConfig = NaviConfig(
+    List(
+      NaviChainSpec(
+        name = if (finalSink.equalsIgnoreCase("Xss")) "second-order-xss" else "second-order-sql",
+        segments = List(
+          NaviSegmentSpec(source = "default", sink = "sqlRead", name = Some("request-to-sql-read")),
+          NaviSegmentSpec(source = "sqlRead", sink = finalSink, name = Some("sql-read-to-final-sink"))
+        ),
+        join = Some(true)
+      )
+    )
+  )
+
+  private def oneSegmentConfig(name: String, source: String, sink: String): NaviConfig = NaviConfig(
+    List(NaviChainSpec(name, List(NaviSegmentSpec(source, sink)), join = Some(false)))
+  )
 
   @Mixin
   private val basicConfig = new BasicConfig
@@ -63,16 +81,74 @@ class TaintModule extends AppModule {
           logger.info("Narrowing unresolved calls to argument-to-result flows")
           new bee.zipper.core.cpgcreation.php.passes.UnresolvedCallFlowPass(cpg).createAndApply()
         }
-        val naviPath = basicConfig.engineConfig.customNaviConfig
-        if (naviPath != null && naviPath.nonEmpty) {
-          // Navigation chain mode: several source/sink segments, each reported separately
-          logger.info(s"Running navigation analysis from: $naviPath")
-          NaviAnalysis.run(NaviConfig.load(naviPath), cpg, api, basicConfig.engineConfig, outputDir)
-        } else {
-          // Traditional taint analysis mode
-          val taintAnalysisResult =
-            executeStaticTaintAnalysis(basicConfig.engineConfig, cpg, api, reachabilityReport)
-          generateReport(taintAnalysisResult, outputDir, true, reachabilityReport)
+        val scenarioOption = basicConfig.engineConfig.scanScenarios != null
+        val scenarios =
+          if (scenarioOption) {
+            basicConfig.engineConfig.enableControlStructure = true
+            val selected = basicConfig.engineConfig.scanScenarios.asScala.toList
+              .map(_.trim.toLowerCase)
+              .filter(_.nonEmpty)
+              .distinct
+            if (selected.isEmpty)
+              List("once-xss", "once-sql", "second-xss", "second-sql", "second-injection")
+            else selected
+          } else Nil
+        val validScenarios   = Set("once-xss", "once-sql", "second-xss", "second-sql", "second-injection")
+        val unknownScenarios = scenarios.toSet -- validScenarios
+        require(unknownScenarios.isEmpty, s"Unknown --scan-scenarios: ${unknownScenarios.toList.sorted.mkString(",")}")
+        require(scenarios.nonEmpty, "--scan-scenarios must select at least one scenario")
+        val customNaviPath = basicConfig.engineConfig.customNaviConfig
+        val requestedKinds = basicConfig.engineConfig.enabledVulnKinds.asScala.toSet
+        scenarios.foreach { scenario =>
+          val scenarioDir = Paths.get(outputDir, "scenarios", scenario).toString
+          FileSys.ensureDirectoryExists(scenarioDir)
+          val vulnKinds = scenario match {
+            case "once-xss" | "second-xss" => Set("Xss")
+            case _                         => Set("SQL", "SqlInjection")
+          }
+          val activeKinds = if (requestedKinds.nonEmpty) vulnKinds.intersect(requestedKinds) else vulnKinds
+          require(activeKinds.nonEmpty, s"--vulnkind excludes all sinks for scenario '$scenario'")
+          SourceSinkSpecManager.setActiveVulnKinds(activeKinds)
+          SanitizerManager.setActiveVulnKinds(activeKinds)
+          logger.info(s"Running scan scenario '$scenario' into $scenarioDir")
+          try {
+            scenario match {
+              case "once-xss" | "once-sql" =>
+                val result = executeStaticTaintAnalysis(
+                  basicConfig.engineConfig,
+                  cpg,
+                  api,
+                  reachabilityReport,
+                  directDataflowOnly = true
+                )
+                generateReport(result, scenarioDir, true, reachabilityReport)
+              case "second-xss" | "second-sql" =>
+                val config =
+                  if (customNaviPath != null && customNaviPath.nonEmpty) {
+                    val loaded = NaviConfig.load(customNaviPath)
+                    NaviConfig(loaded.chains.map { chain =>
+                      val ending = if (scenario == "second-xss") "Xss" else "sql"
+                      chain.copy(segments = chain.segments.dropRight(1) :+ chain.segments.last.copy(sink = ending))
+                    })
+                  } else secondOrderConfig(if (scenario == "second-xss") "Xss" else "sql")
+                NaviAnalysis.run(config, cpg, api, basicConfig.engineConfig, scenarioDir, enableNaviControlFlow = true)
+              case "second-injection" =>
+                val config =
+                  if (customNaviPath != null && customNaviPath.nonEmpty) {
+                    val loaded = NaviConfig.load(customNaviPath)
+                    NaviConfig(
+                      loaded.chains.map(chain =>
+                        chain
+                          .copy(segments = chain.segments.dropRight(1) :+ chain.segments.last.copy(sink = "sqlWrite"))
+                      )
+                    )
+                  } else oneSegmentConfig("request-to-sql-write", "default", "sqlWrite")
+                NaviAnalysis.run(config, cpg, api, basicConfig.engineConfig, scenarioDir, enableNaviControlFlow = false)
+            }
+          } finally {
+            SourceSinkSpecManager.clearActiveVulnKinds()
+            SanitizerManager.clearActiveVulnKinds()
+          }
         }
         // save cpg to file
         try cpg.close()
@@ -152,7 +228,8 @@ object TaintCmd {
     c: EngineConfig,
     cpg: Cpg,
     api: Api,
-    reachabilityReport: Option[ReachabilityReportCollector] = None
+    reachabilityReport: Option[ReachabilityReportCollector] = None,
+    directDataflowOnly: Boolean = false
   ): TaintAnalysisResult = {
     val aliasFinder =
       if (c.enableOnDemandAliasAnalysis && !c.enableObjectDataDependency)
@@ -174,8 +251,9 @@ object TaintCmd {
           enableKeywordMatching = c.enableSanitizerKeywordMatching,
           enableIndirectSuperGlobalFetching = c.enableIndirectSuperGlobalFetching,
           aliasFinder = aliasFinder,
-          enableControlStructure = c.enableControlStructure,
-          enableImplicitTaint = c.enableImplicitTaint
+          enableControlStructure = !directDataflowOnly && c.enableControlStructure,
+          enableImplicitTaint = !directDataflowOnly && c.enableImplicitTaint,
+          includeUntaintedSinks = !directDataflowOnly && c.enableControlStructure
         )
     val result = taintAnalysis.analyze()
     if (c.enableReachabilityAnalysis || reachabilityReport.nonEmpty) {

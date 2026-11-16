@@ -37,9 +37,14 @@ trait TaintSourceSearcher {
 
   /** Calls that read rows from the database, as configured by the `sqlQueries` source section. */
   def sqlQuerySources(): List[Call] = Nil
+
+  /** Values originating directly from an external request (for example PHP superglobal reads). */
+  def requestSources(): List[CfgNode] = search()._1
 }
 
 class PythonTaintSourceSearcher(cpg: Cpg, vfg: Vfg) extends TaintSourceSearcher {
+  override def requestSources(): List[CfgNode] = MethodCallSearcher.search()
+
   override def search(): (List[CfgNode], List[Method]) = {
     val sources: List[CfgNode] = MethodCallSearcher.search()
     (sources, List.empty)
@@ -104,6 +109,15 @@ class PHPTaintSourceSearcher(
   override def search(): (List[CfgNode], List[Method]) = identifySourcesAndWrappers()
 
   override def sqlQuerySources(): List[Call] = sqlQueryCalls
+
+  override def requestSources(): List[CfgNode] = {
+    val superGlobalFetching =
+      if (enableIndirectSuperGlobalFetching)
+        directSuperGlobalFetching ++ indirectSuperGlobalFetching
+      else
+        directSuperGlobalFetching
+    superGlobalFetching.distinct
+  }
 
   private def identifySourcesAndWrappers(): (List[CfgNode], List[Method]) = {
     def isLiteralFetching(call: Call): Boolean = {
