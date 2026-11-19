@@ -82,7 +82,10 @@ class TaintModule extends AppModule {
           logger.info("Narrowing unresolved calls to argument-to-result flows")
           new bee.zipper.core.cpgcreation.php.passes.UnresolvedCallFlowPass(cpg).createAndApply()
         }
-        val scenarioOption = basicConfig.engineConfig.scanScenarios != null
+        // Picocli may materialize an empty collection for an omitted List option. Treat null/empty as
+        // "option not supplied" so legacy direct/navi execution remains available.
+        val scenarioOption =
+          basicConfig.engineConfig.scanScenarios != null && !basicConfig.engineConfig.scanScenarios.isEmpty
         val scenarios =
           if (scenarioOption) {
             basicConfig.engineConfig.enableControlStructure = true
