@@ -97,68 +97,94 @@ class TaintModule extends AppModule {
               List("once-xss", "once-sql", "second-xss", "second-sql", "second-injection")
             else selected
           } else Nil
-        val validScenarios   = Set("once-xss", "once-sql", "second-xss", "second-sql", "second-injection")
-        val unknownScenarios = scenarios.toSet -- validScenarios
-        require(unknownScenarios.isEmpty, s"Unknown --scan-scenarios: ${unknownScenarios.toList.sorted.mkString(",")}")
-        require(!scenarioOption || scenarios.nonEmpty, "--scan-scenarios must select at least one scenario")
         val customNaviPath = basicConfig.engineConfig.customNaviConfig
         val requestedKinds = basicConfig.engineConfig.enabledVulnKinds.asScala.toSet
-        scenarios.foreach { scenario =>
-          val scenarioDir = Paths.get(outputDir, "scenarios", scenario).toString
-          FileSys.ensureDirectoryExists(scenarioDir)
-          val vulnKinds = scenario match {
-            case "once-xss" | "second-xss" => Set("Xss")
-            case _                         => Set("SQL", "SqlInjection")
-          }
-          val activeKinds = if (requestedKinds.nonEmpty) vulnKinds.intersect(requestedKinds) else vulnKinds
-          require(activeKinds.nonEmpty, s"--vulnkind excludes all sinks for scenario '$scenario'")
-          SourceSinkSpecManager.setActiveVulnKinds(activeKinds)
-          SanitizerManager.setActiveVulnKinds(activeKinds)
-          logger.info(s"Running scan scenario '$scenario' into $scenarioDir")
-          try {
-            scenario match {
-              case "once-xss" | "once-sql" =>
-                val result = executeStaticTaintAnalysis(
-                  basicConfig.engineConfig,
-                  cpg,
-                  api,
-                  reachabilityReport,
-                  directDataflowOnly = true,
-                  excludeDbMediatedFlows = true
-                )
-                generateReport(
-                  TaintCmd.prioritizeReliableXssFilters(result, cpg, api.vfg, basicConfig.engineConfig),
-                  scenarioDir,
-                  true,
-                  reachabilityReport
-                )
-              case "second-xss" | "second-sql" =>
-                val config =
-                  if (customNaviPath != null && customNaviPath.nonEmpty) {
-                    val loaded = NaviConfig.load(customNaviPath)
-                    NaviConfig(loaded.chains.map { chain =>
-                      val ending = if (scenario == "second-xss") "Xss" else "sql"
-                      chain.copy(segments = chain.segments.dropRight(1) :+ chain.segments.last.copy(sink = ending))
-                    })
-                  } else secondOrderConfig(if (scenario == "second-xss") "Xss" else "sql")
-                NaviAnalysis.run(config, cpg, api, basicConfig.engineConfig, scenarioDir, enableNaviControlFlow = true)
-              case "second-injection" =>
-                val config =
-                  if (customNaviPath != null && customNaviPath.nonEmpty) {
-                    val loaded = NaviConfig.load(customNaviPath)
-                    NaviConfig(
-                      loaded.chains.map(chain =>
-                        chain
-                          .copy(segments = chain.segments.dropRight(1) :+ chain.segments.last.copy(sink = "sqlWrite"))
-                      )
-                    )
-                  } else oneSegmentConfig("request-to-sql-write", "default", "sqlWrite")
-                NaviAnalysis.run(config, cpg, api, basicConfig.engineConfig, scenarioDir, enableNaviControlFlow = false)
+        if (scenarioOption) {
+          val validScenarios   = Set("once-xss", "once-sql", "second-xss", "second-sql", "second-injection")
+          val unknownScenarios = scenarios.toSet -- validScenarios
+          require(
+            unknownScenarios.isEmpty,
+            s"Unknown --scan-scenarios: ${unknownScenarios.toList.sorted.mkString(",")}"
+          )
+          require(scenarios.nonEmpty, "--scan-scenarios must select at least one scenario")
+          scenarios.foreach { scenario =>
+            val scenarioDir = Paths.get(outputDir, "scenarios", scenario).toString
+            FileSys.ensureDirectoryExists(scenarioDir)
+            val vulnKinds = scenario match {
+              case "once-xss" | "second-xss" => Set("Xss")
+              case _                         => Set("SQL", "SqlInjection")
             }
-          } finally {
-            SourceSinkSpecManager.clearActiveVulnKinds()
-            SanitizerManager.clearActiveVulnKinds()
+            val activeKinds = if (requestedKinds.nonEmpty) vulnKinds.intersect(requestedKinds) else vulnKinds
+            require(activeKinds.nonEmpty, s"--vulnkind excludes all sinks for scenario '$scenario'")
+            SourceSinkSpecManager.setActiveVulnKinds(activeKinds)
+            SanitizerManager.setActiveVulnKinds(activeKinds)
+            logger.info(s"Running scan scenario '$scenario' into $scenarioDir")
+            try {
+              scenario match {
+                case "once-xss" | "once-sql" =>
+                  val result = executeStaticTaintAnalysis(
+                    basicConfig.engineConfig,
+                    cpg,
+                    api,
+                    reachabilityReport,
+                    directDataflowOnly = true,
+                    excludeDbMediatedFlows = true
+                  )
+                  generateReport(
+                    TaintCmd.prioritizeReliableXssFilters(result, cpg, api.vfg, basicConfig.engineConfig),
+                    scenarioDir,
+                    true,
+                    reachabilityReport
+                  )
+                case "second-xss" | "second-sql" =>
+                  val config =
+                    if (customNaviPath != null && customNaviPath.nonEmpty) {
+                      val loaded = NaviConfig.load(customNaviPath)
+                      NaviConfig(loaded.chains.map { chain =>
+                        val ending = if (scenario == "second-xss") "Xss" else "sql"
+                        chain.copy(segments = chain.segments.dropRight(1) :+ chain.segments.last.copy(sink = ending))
+                      })
+                    } else secondOrderConfig(if (scenario == "second-xss") "Xss" else "sql")
+                  NaviAnalysis.run(
+                    config,
+                    cpg,
+                    api,
+                    basicConfig.engineConfig,
+                    scenarioDir,
+                    enableNaviControlFlow = true
+                  )
+                case "second-injection" =>
+                  val config =
+                    if (customNaviPath != null && customNaviPath.nonEmpty) {
+                      val loaded = NaviConfig.load(customNaviPath)
+                      NaviConfig(
+                        loaded.chains.map(chain =>
+                          chain
+                            .copy(segments = chain.segments.dropRight(1) :+ chain.segments.last.copy(sink = "sqlWrite"))
+                        )
+                      )
+                    } else oneSegmentConfig("request-to-sql-write", "default", "sqlWrite")
+                  NaviAnalysis.run(
+                    config,
+                    cpg,
+                    api,
+                    basicConfig.engineConfig,
+                    scenarioDir,
+                    enableNaviControlFlow = false
+                  )
+              }
+            } finally {
+              SourceSinkSpecManager.clearActiveVulnKinds()
+              SanitizerManager.clearActiveVulnKinds()
+            }
           }
+        } else if (customNaviPath != null && customNaviPath.nonEmpty) {
+          logger.info(s"Running navigation analysis from: $customNaviPath")
+          NaviAnalysis.run(NaviConfig.load(customNaviPath), cpg, api, basicConfig.engineConfig, outputDir)
+        } else {
+          val taintAnalysisResult =
+            executeStaticTaintAnalysis(basicConfig.engineConfig, cpg, api, reachabilityReport)
+          generateReport(taintAnalysisResult, outputDir, true, reachabilityReport)
         }
         // save cpg to file
         try cpg.close()
