@@ -100,7 +100,7 @@ class TaintModule extends AppModule {
         val validScenarios   = Set("once-xss", "once-sql", "second-xss", "second-sql", "second-injection")
         val unknownScenarios = scenarios.toSet -- validScenarios
         require(unknownScenarios.isEmpty, s"Unknown --scan-scenarios: ${unknownScenarios.toList.sorted.mkString(",")}")
-        require(scenarios.nonEmpty, "--scan-scenarios must select at least one scenario")
+        require(!scenarioOption || scenarios.nonEmpty, "--scan-scenarios must select at least one scenario")
         val customNaviPath = basicConfig.engineConfig.customNaviConfig
         val requestedKinds = basicConfig.engineConfig.enabledVulnKinds.asScala.toSet
         scenarios.foreach { scenario =>
