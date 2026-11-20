@@ -35,12 +35,12 @@ class GlobalVariableFlowPass(cpg: Cpg, defUse: GlobalVariableDefUse) extends Cpg
     defUse.defines.foreach(x => {
       // `to` node is the statement that uses the `global var`
       val to = x._1._1
-      // `from` node is the RIGHT side of the definition statement
+      // `from` node is the RIGHT side of the definition statement. `argument(1)` is the assignment target.
       val opt: Option[CfgNode] = {
         val defStmt = x._2
         defStmt match {
           case call: Call if call.isGenericAssignment =>
-            Some(call.argument(1))
+            call.argumentOption(2)
           case _ => None
         }
       }

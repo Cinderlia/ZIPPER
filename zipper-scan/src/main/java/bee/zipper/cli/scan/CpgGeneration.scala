@@ -114,6 +114,11 @@ object CpgGeneration {
     if (c.enableGlobalDataDependency) {
       logger.info("Building global variable def-use chains")
       GlobalVariableFlowLayer.run(cpg, api.globalDefUse(lightweight = true))
+
+      // Superglobals are shared by every file of the program, while the def-use chains above are ICFG based and can
+      // only cross an already resolved call edge. Bridge the container entries (e.g. `$_SESSION['login']`) directly.
+      logger.info("Bridging superglobal container reads and writes")
+      new SuperglobalFlowPass(cpg, api.vsa).createAndApply()
     }
 
     if (c.enableObjectDataDependency && !c.enableOnDemandAliasAnalysis) {
