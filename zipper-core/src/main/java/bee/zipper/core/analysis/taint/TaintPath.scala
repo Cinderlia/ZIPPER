@@ -34,6 +34,22 @@ case class TaintPath(
 
   override def iterator: Iterator[CfgNode] = path.iterator
 
+  /** Path plus the statements that build the SQL strings of its query nodes. Those assignments are not data-flow nodes,
+    * but without them a database path shows only `$link->query($sql)` and never which statement is executed.
+    */
+  def contextPath: List[CfgNode] = {
+    val present = path.iterator.map(_.id()).toSet
+    val out     = List.newBuilder[CfgNode]
+    val added   = scala.collection.mutable.Set.empty[Long]
+    path.foreach { node =>
+      SqlSourceContext.sqlDefinition(node).foreach { definition =>
+        if (!present.contains(definition.id()) && added.add(definition.id())) out += definition
+      }
+      out += node
+    }
+    out.result()
+  }
+
   def prettyPrint: String = {
     Path.show.apply(Path(path))
   }

@@ -200,7 +200,7 @@ object TaintSliceBuilder {
       .toList
       .map { group =>
         val sink     = group.head.sink
-        val nodes    = perLine(group.flatMap(_.path), sourceIds, sink.id())
+        val nodes    = perLine(group.flatMap(_.contextPath), sourceIds, sink.id())
         val srcNodes = group.map(_.source).distinctBy(_.id())
         TaintSlice(
           kind = group.head.kind,
@@ -255,7 +255,7 @@ object CompactFlowBuilder {
   private def stepsOf(path: TaintPath, sourceIds: Set[Long]): List[String] = {
     val seen = mutable.Set.empty[Int]
     val out  = mutable.ListBuffer.empty[String]
-    path.path.foreach { node =>
+    path.contextPath.foreach { node =>
       if (significant(node, sourceIds, path.sink.id()) && !noise(node.code)) {
         val line = lineOf(node)
         if (seen.add(line)) out += s"${fileOf(node)}:$line  ${displayCode(node)}"
