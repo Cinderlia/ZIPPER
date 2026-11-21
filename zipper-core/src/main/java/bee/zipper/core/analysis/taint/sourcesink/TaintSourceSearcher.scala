@@ -266,12 +266,14 @@ class PHPTaintSourceSearcher(
     filterSanitizedSources(rawSources)
   }
 
+  /** PHP function names are case-insensitive, so the configured names are compared ignoring case. */
+  private def matchesName(expected: String, actual: String): Boolean =
+    expected.equalsIgnoreCase(actual)
+
   private def locateFunctionCalls(): List[Call] = {
     val allFunctionCalls = cpg.call.filter(_.receiver.isEmpty).toList
-    SourceSinkSpecManager
-      .getSource(language)
-      .functions
-      .flatMap(allFunctionCalls.name(_))
+    val expectedNames    = SourceSinkSpecManager.getSource(language).functions
+    allFunctionCalls.filter(call => expectedNames.exists(matchesName(_, call.name)))
   }
 
   /** Calls that read rows from the database. Only statements classified as queries (or unclassified) are registered, so
@@ -284,7 +286,7 @@ class PHPTaintSourceSearcher(
         val functionCalls = cpg.call.filter(_.receiver.isEmpty).toList
         val methodCalls   = cpg.call.filter(_.receiver.nonEmpty).toList
         val matched =
-          functionCalls.filter(call => spec.functions.exists(spec => spec.name == call.name)) ++
+          functionCalls.filter(call => spec.functions.exists(spec => matchesName(spec.name, call.name))) ++
             methodCalls.filter(call => spec.methods.exists(spec => matchesMethodSpec(call, spec)))
         val required = SourceSinkSpecManager.getSourceStatementKind.getOrElse(SqlStatementKind.Read)
         matched.filter(call => SqlStatementClassifier.kindOfCall(call).forall(_ == required))
@@ -292,7 +294,7 @@ class PHPTaintSourceSearcher(
   }
 
   private def matchesMethodSpec(call: Call, spec: MethodCallSinkSpec): Boolean =
-    spec.methodName == call.name && (
+    matchesName(spec.methodName, call.name) && (
       (spec.receiverName.exists(expected => call.receiver.exists(_.code == expected))) ||
         (spec.typeName.exists(expected => isMatchedTypeName(call, expected))) ||
         (spec.receiverName.isEmpty && spec.typeName.isEmpty)
@@ -305,7 +307,7 @@ class PHPTaintSourceSearcher(
       .methods
     allMethodCalls.filter(call =>
       sources.exists(source =>
-        source.methodName == call.name && (
+        matchesName(source.methodName, call.name) && (
           (source.receiverName match {
             case Some(expectedReceiver) =>
               call.receiver.exists(_.code == expectedReceiver)

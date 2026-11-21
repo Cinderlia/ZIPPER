@@ -30,6 +30,34 @@
       }
     ],
     "functions": [],
-    "methods": []
+    "methods": [],
+    "sqlQueries": {
+      "functions": [
+        { "name": "sqlQuery" },
+        { "name": "sqlQueryNoLog" },
+        { "name": "sqlQueryNoLogIgnoreError" },
+        { "name": "sqlStatement" },
+        { "name": "sqlStatementNoLog" },
+        { "name": "sqlStatementThrowException" },
+        { "name": "formFetch" },
+        { "name": "fetchRecords" },
+        { "name": "fetchSingleValue" },
+        { "name": "fetchTableColumn" },
+        { "name": "dbQuery" },
+        { "name": "db_select" }
+      ],
+      "methods": [
+        { "typeName": null, "receiverName": null, "methodName": "getAll" },
+        { "typeName": null, "receiverName": null, "methodName": "getRow" },
+        { "typeName": null, "receiverName": null, "methodName": "getOne" },
+        { "typeName": null, "receiverName": null, "methodName": "getAssoc" },
+        { "typeName": null, "receiverName": null, "methodName": "fetchRow" },
+        { "typeName": null, "receiverName": null, "methodName": "fetchArray" },
+        { "typeName": null, "receiverName": null, "methodName": "fetchAssoc" },
+        { "typeName": null, "receiverName": null, "methodName": "fetchRecords" },
+        { "typeName": null, "receiverName": null, "methodName": "fetchSingleValue" },
+        { "typeName": null, "receiverName": null, "methodName": "fetchTableColumn" }
+      ]
+    }
   }
 }
