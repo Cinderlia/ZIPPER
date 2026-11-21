@@ -276,9 +276,13 @@ class PHPTaintSourceSearcher(
     allFunctionCalls.filter(call => expectedNames.exists(matchesName(_, call.name)))
   }
 
-  /** Calls that read rows from the database. Only statements classified as queries (or unclassified) are registered, so
-    * write statements such as INSERT/UPDATE/DELETE never become sources.
+  /** Calls that read rows from the database. A call whose SQL text is visible is a source when it reads rows; a generic
+    * executor such as `$xpath->query()`, `$template->fetch()` or `$queue->execute()` without a visible statement is
+    * not. Row getters (`fetch_object()`, `get_row()`, ...) cannot execute a statement on their own and stay sources.
     */
+  private def ambiguousExecutorNames: Set[String] =
+    Set("query", "execute", "exec", "prepare", "fetch", "fetchall")
+
   private def locateSqlQueryCalls(): List[Call] = {
     SourceSinkSpecManager.getSource(language).sqlQueries match {
       case None => Nil
@@ -289,7 +293,12 @@ class PHPTaintSourceSearcher(
           functionCalls.filter(call => spec.functions.exists(spec => matchesName(spec.name, call.name))) ++
             methodCalls.filter(call => spec.methods.exists(spec => matchesMethodSpec(call, spec)))
         val required = SourceSinkSpecManager.getSourceStatementKind.getOrElse(SqlStatementKind.Read)
-        matched.filter(call => SqlStatementClassifier.kindOfCall(call).forall(_ == required))
+        matched.filter(call =>
+          SqlStatementClassifier.kindOfCall(call) match {
+            case Some(kind) => kind == required
+            case None       => !ambiguousExecutorNames.exists(matchesName(_, call.name))
+          }
+        )
     }
   }
 
