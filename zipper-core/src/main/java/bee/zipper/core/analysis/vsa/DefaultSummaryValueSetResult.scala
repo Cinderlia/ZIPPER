@@ -57,6 +57,22 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
     * @param isInInitMethod
     *   Flag whether it's currently in the init method, which is used to avoid infinite recursion.
     */
+  /** Identifier of a memoized evaluation state: `(method, basic block order, variable name, partial evaluation)`. */
+  private type MemoKey = (Long, Int, String, Boolean)
+
+  /** Per-query memo of the evaluation states that have already been computed, or that are currently being computed
+    * (`None` as value). The global [[cache2]] is bounded and shared by every query, so on large code bases a single
+    * query both evicts its own intermediate results and re-enters the same states through different branches, which
+    * made one `ptsOf` call take minutes. This memo lives only for one `ptsOf` query: it is unbounded, and a re-entrant
+    * state is cut immediately rather than being expanded again.
+    */
+  private type QueryMemo = mutable.HashMap[MemoKey, Option[Result]]
+
+  /** Upper bound of the recursive evaluation depth of one query; deeper recursions are cut instead of relying on
+    * [[StackOverflowError]]. Override with `-Dzipper.vsa.depth=N`.
+    */
+  private val maxDepth = Integer.getInteger("zipper.vsa.depth", 4000).intValue()
+
   private case class Env(
     m: Method,
     bbCfg: DefaultBBCfg,
@@ -65,7 +81,9 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
     partialEval: Boolean,
     isInInitMethod: Boolean,
     walk: Set[DefaultBasicBlock],
-    pathCallGraph: Option[PathCallGraph]
+    pathCallGraph: Option[PathCallGraph],
+    depth: Int,
+    queryMemo: QueryMemo
   )
 
   /** @param name
@@ -127,7 +145,9 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
                     partialEval,
                     isInInitMethod,
                     Set.empty,
-                    pathCallGraph
+                    pathCallGraph,
+                    0,
+                    mutable.HashMap.empty
                   )
                 val (pts, sideEffects) = evalVariable(env, name)
                 // transform `dummy object` to `.*` pattern if it is in partial evaluation mode
@@ -184,30 +204,51 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
     val currentSideEffects = findSideEffectsOn(env, name)
     val (pts, backwardSideEffects) =
       try {
-        if (isBackEdge(env)) (Set.empty[SymbolicValue], List.empty)
+        if (env.depth > maxDepth) (Set.empty[SymbolicValue], List.empty)
+        else if (isBackEdge(env)) (Set.empty[SymbolicValue], List.empty)
         else {
-          val _env = env.copy(walk = env.walk + env.bb)
-          val key  = (_env.bb, name)
-          val result = cache2.getOrElseUpdate(
-            (key, _env.partialEval), {
-              import _env.*
-              val bbSummary = funSummary.blockSummaries.getOrElse(bb, BlockSummary.empty)
-              val (pts, sideEffects) = bbSummary.dataflow.get(name) match {
-                case Some(sv) =>
-                  val recursiveName = if (isRecursive(name, sv)) Some(name) else None
-                  evalSym(_env, sv, recursiveName)
-                case None =>
-                  // backward if there is no entry in the dataflow
-                  backward(_env, name)
-              }
-              // create a dummy value for unresolved variable
-              if (pts.isEmpty)
-                (Set(DummyObject(name)), sideEffects)
-              else
-                (pts, sideEffects)
-            }
-          )
-          result
+          val _env    = env.copy(walk = env.walk + env.bb, depth = env.depth + 1)
+          val key     = (_env.bb, name)
+          val memoKey = (_env.bb.m.id, _env.bb.order, name, _env.partialEval)
+          val memo    = _env.queryMemo
+          memo.get(memoKey) match {
+            case Some(Some(result)) =>
+              // this state has already been evaluated during the current query
+              result
+            case Some(None) =>
+              // this state is being evaluated further up the recursion: cut the cycle
+              (Set.empty[SymbolicValue], List.empty)
+            case None =>
+              memo.put(memoKey, None)
+              val result =
+                try {
+                  cache2.getOrElseUpdate(
+                    (key, _env.partialEval), {
+                      import _env.*
+                      val bbSummary = funSummary.blockSummaries.getOrElse(bb, BlockSummary.empty)
+                      val (pts, sideEffects) = bbSummary.dataflow.get(name) match {
+                        case Some(sv) =>
+                          val recursiveName = if (isRecursive(name, sv)) Some(name) else None
+                          evalSym(_env, sv, recursiveName)
+                        case None =>
+                          // backward if there is no entry in the dataflow
+                          backward(_env, name)
+                      }
+                      // create a dummy value for unresolved variable
+                      if (pts.isEmpty)
+                        (Set(DummyObject(name)), sideEffects)
+                      else
+                        (pts, sideEffects)
+                    }
+                  )
+                } catch {
+                  case _: IllegalStateException =>
+                    logger.warn("`evalVariable` catches IllegalStateException")
+                    (Set.empty[SymbolicValue], List.empty)
+                }
+              memo.put(memoKey, Some(result))
+              result
+          }
         }
       } catch {
         case _: IllegalStateException =>
@@ -556,7 +597,9 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
               env.partialEval,
               isInitMethod(caller),
               env.walk,
-              env.pathCallGraph
+              env.pathCallGraph,
+              env.depth + 1,
+              env.queryMemo
             )
             evalVariable(_env, translate(arg).toString)
           case _ => (Set.empty, List.empty)
@@ -612,7 +655,9 @@ class DefaultSummaryValueSetResult(cpg: Cpg)(implicit ctx: AnalysisContext) exte
           env.partialEval,
           isInInitMethod = true,
           env.walk,
-          env.pathCallGraph
+          env.pathCallGraph,
+          env.depth + 1,
+          env.queryMemo
         )
         evalVariable(newEnv, name)._1
       )
