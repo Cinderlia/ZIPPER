@@ -1,0 +1,128 @@
+# Zipper taint 分析：已知未修复问题清单
+
+记录时间：2026-11-21（容器 `php84-dev`，仓库 HEAD `9878261`）
+用途：本阶段排查 openemr / bWAPP / showdoc 时发现的、**尚未修复**的问题。每条都带最小复现和实测结果，方便以后接手。
+
+复现工程都在 `/home/so/share/`（宿主 `/tmp/share/`），统一用
+`--custom-navi=/home/so/share/navi-read-xss.json`（单段 `sqlRead → Xss`）、
+`--custom-sink=/home/so/zipper-test/sink.json`、`--custom-source=/home/so/zipper-test/source.json`，
+并带 `--enable-object-data-dependency`（除特别说明）。
+
+---
+
+## 1. 跨方法对象字段丢失（P1，影响面最大）
+
+**现象**：字段在 A 方法写、在 B 方法读，污点丢失；同方法内读写则正常。
+
+| 复现 | 结果 |
+|---|---|
+| `p1.php`：`function f($v){ $this->x = $v; echo $this->x; }` | ✅ 1 条 |
+| `p2.php`：`$q->set2($c['u']); echo $q->get2();`（`set2` 写 `$this->x`，`get2` 返回 `$this->x`） | ❌ 0 条 |
+| `p3.php`：`__construct($v){ $this->x=$v; }` + `get3(){ return $this->x; }` | ❌ 0 条 |
+
+目录：`/home/so/share/t-pl11`（p1/p2/p3）。
+
+**真实影响**：
+- `controllers/C_Prescription.class.php:575`（`echo $p->patient->get_name_display()`）——`Patient::populate()` 写 `$this->fname/$this->lname`，`get_name_display()` 读；`library/classes/Patient.class.php:73-76`。
+- `interface/patient_file/summary/create_portallogin.php:79` 链路中的 `setData()/getData()`（见问题 3）。
+
+**根因**：对象字段的污点只在“同一方法内写后读”时保留，跨方法没有字段摘要（field summary）。
+
+**修复方向**：给每个类字段建“写入方法 → 字段 → 读取方法”的摘要并在调用点代入；或在 ICFG 上为字段建节点。
+
+---
+
+## 2. 把“数组字面量整体”传出去会丢污点（P1）
+
+**现象**：数组字面量在**同作用域**里读下标是通的，但把数组本身（或直接把字面量）作为实参传给函数/方法后，污点丢失。
+
+| 复现 | 结果 |
+|---|---|
+| `j1.php`：`$arr = ['u' => $c['u']]; echo $arr['u'];` | ✅ |
+| `j2.php`：`$arr = []; $arr['u'] = $c['u']; echo $arr['u'];` | ✅ |
+| `j3.php`：`$arr = [$c['u']]; echo $arr[0];` | ✅ |
+| `n1.php`：`echo (new K1())->passK1(['u' => $c['u']]);` | ❌ 0 条 |
+| `n2.php`：`echo passK2(['u' => $c['u']]);` | ❌ 0 条 |
+| `n3.php`：`$arr = ['u' => $c['u']]; echo (new K3())->passK3($arr);` | ❌ 0 条 |
+
+目录：`/home/so/share/t-pl9`（j）、`/home/so/share/t-pl10`（n）。
+
+**真实影响**：`create_portallogin.php:79` 的第三个实参是数组字面量 `['login_uname' => $credentials['portal_login_username'], ...]`。
+
+**修复方向**：让数组字面量的“元素污点”同时挂到数组变量/实参节点上（现在只挂在 `indexAccess` 读上）。
+
+---
+
+## 3. Twig 模板里的 sink 不在 CPG 里（P2）
+
+`create_portallogin.php:79 echo $patientAccessOnSiteService->filterTwigTemplateData($pid,'patient/portal_login/print.html.twig',[...])`：
+
+- 真正的注入点在 `templates/patient/portal_login/print.html.twig:83 <input ... value="{{ login_uname }}">`（`autoescape=false`，`src/Common/Twig/TwigContainer.php:67`）；
+- `.twig` 不在 PHP CPG 中，`filterTwigTemplateData()`（`src/Services/PatientAccessOnsiteService.php:192-212`）返回 `$this->twig->render($templateName, $paramData)`，`render` 也没建模成“回显 data 数组”。
+
+**修复方向**：把模板文件作为 sink 建模（或把 `render($name,$data)` 视为“data 全部回显”），并保留模板名到数据键的映射。
+
+---
+
+## 4. gad7：CPG 有链，整库规模下引擎不展开（P2，暂时放弃）
+
+`interface/forms/gad7/view.php:102/247 echo text($obj[...])`（`$obj = formFetch("form_gad7", $_GET["id"])`）。
+
+- 已排除：sink 已识别、source 已识别（`[navi-debug] sql source: ... view.php:29 formFetch(...)`）、flag 无关；
+- 隔离工程 `/home/so/share/t-oe`（真实 view.php + library/{api.inc.php,sql.inc.php,htmlspecialchars.inc.php} + globals.php）用同一套 flags → **10 条** flow；
+- 整库 CPG 里这条链存在（javac 探针 `Probe13.java`：`formFetch(29) → $obj(29) → $obj["nervous_score"](102) → text(102) → echo(102)`，CFG 也连通）；
+- 全库只这一类 `echo text($obj[...])` 为 0，其它 74 条 `echo text($row[...])` 都能出。
+
+**结论**：不是建模/C PG 缺边，而是整库规模下没展开（或算出来后被后处理丢弃）。下一步可用 joern 片段 `snk.reachableByFlows(src).p` 判断是引擎侧还是 `DefaultTaintAnalysis.scala:127-151` 的过滤侧。
+
+---
+
+## 5. `import_template.php:362` 未连（P2）
+
+- `echo text($content)` 是 `renderEditorHtml($_REQUEST['docid'], $template_content)` 的实参；同文件 `:59 echo $template['template_content']` 已能出（2 条）。
+- `:305 $template_content = $content['template_content'];` → `:312 renderEditorHtml($_REQUEST['docid'], $template_content)` → 函数内 `echo text($content)`。
+- 断点未定位到最小用例（介于“参数进函数”和“text() 调用”之间）。
+
+---
+
+## 6. 通用 DB 帮助函数让报告量偏大（P2）
+
+openemr 单段 `sqlRead → Xss` 过滤噪声后仍有 **3833 条**：
+
+- `library/options.inc.php` 一个文件 1181 条、`interface/reports/clinical_reports.php` 248、`library/translation.inc.php` 193；
+- 这些是“`sqlQuery(...)` 读库 → `generate_display_field()`/`text()` 输出”的**真**数据流，只是不是 CVE sink。
+
+**方向**：源过滤已到极限（`xpath->query`/`$tpl->fetch` 一共才一百来个），要继续降噪得在**报告侧**做优先级/通用输出点过滤（例如把 `options.inc.php` 这类通用渲染函数降权），而不是删源。
+
+---
+
+## 7. showdoc 型“上传文件 → 静态回显”完全没建模（P1，针对该类 CVE）
+
+`D:\files\Second Order\实验\dbfuzz\showdoc\` 那批 15 条 CVE 全部落在 `Attachment*`，链路是：
+`$_FILES['tmp_name']` → `move_uploaded_file()` → `./../Public/Uploads/xxx.aspx` → Web 服务器当 HTML 静态返回。
+
+现状：
+- `$_FILES` **不是 source**（内置 globals 只有 `_REQUEST/_POST/_GET/HTTP_*_VARS/_SERVER`）；
+- `move_uploaded_file` 属 `FileManipulation`，不属 `Xss`；
+- 没有“写文件 → 静态目录可访问 → 浏览器执行”的桥；
+- `header("location:$url")` 不在任何 sink kind 里（Xss 名单没有 `header`）；
+- ThinkPHP 的 `where(...)->find()` 不在 `sqlQueries.methods`，`SqlStatementClassifier` 也看不到 SQL 文本 → 连 sqlRead 源都不是；
+- 2.10.4 已被白名单封堵（`AttachmentModel.class.php:324-339 isAllowedFilename()`），要走通得回退 v2.10.3。
+
+---
+
+## 8. Splendor 的表/列二阶桥依赖建表 DDL（P2）
+
+`SplendorModule` → `TwoPhaseTaintAnalysis` 按“表+列”合并 write→read。bWAPP 建表 SQL 不在 PHP 源码里，实测 `/home/so/share/bwapp-splendor/database-schema.json` = `{"tables": []}`，桥为空。
+
+---
+
+## 附：本阶段已修复（供对照）
+
+| 提交 | 内容 |
+|---|---|
+| `cfa6ea0` | 单次 `ptsOf` 加查询内 memo + 深度上限，修 openemr VSA 阶段近指数回溯（原来半小时卡死在第一个查询） |
+| `a20f7ab` | 超全局容器 + 下标跨文件桥（`$_SESSION[...]` 等，`--enable-global-data-dependency`），bWAPP `xss_stored_3` 因此可出 |
+| `0721514` | 报告里带上“构造 SQL 的那一行”（`$sql = "SELECT ..."`） |
+| `fc146e9` | SQL 源匹配大小写不敏感 + 常见 DB 包装（`sqlQuery`/`sqlStatement`/`fetchRecords`/`Execute` 等） |
+| `9878261` | sqlRead 源过滤：`query/execute/exec/prepare/fetch/fetchAll` 无可见 SQL 文本时不再当源（`$xpath->query()`、`$tpl->fetch()` 等噪声） |
