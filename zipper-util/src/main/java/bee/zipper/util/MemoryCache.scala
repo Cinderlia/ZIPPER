@@ -3,7 +3,6 @@ package bee.zipper.util
 import com.github.benmanes.caffeine.cache
 
 import java.util.concurrent.TimeUnit
-import java.util.function.Function
 
 object MemoryCache {
 
@@ -25,14 +24,21 @@ object MemoryCache {
   }
 
   extension [K, V](c: cache.Cache[K, V]) {
+
+    /** Callers re-enter the same cache while computing a value (the value-set analysis evaluates a variable through its
+      * predecessors, which evaluates further variables), so the value has to be computed without holding a cache lock.
+      * `computeIfAbsent` keeps the bin locked for the whole evaluation, and two caches entered in opposite orders by
+      * different threads then deadlock. Computing first and storing after is safe here because every entry is a pure
+      * function of the key.
+      */
     def getOrElseUpdate(key: K, op: => V): V = {
-      c.asMap()
-        .computeIfAbsent(
-          key,
-          new Function[K, V] {
-            override def apply(k: K): V = op
-          }
-        )
+      val cached = c.getIfPresent(key)
+      if (cached != null) cached
+      else {
+        val value = op
+        c.put(key, value)
+        value
+      }
     }
   }
 }
