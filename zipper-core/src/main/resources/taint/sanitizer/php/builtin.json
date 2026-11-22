@@ -83,7 +83,6 @@
     "genericSanitizer": [
       "dirname",
       "number_format",
-      "json_encode",
       "date",
       "filter_var",
       "filter_input",
