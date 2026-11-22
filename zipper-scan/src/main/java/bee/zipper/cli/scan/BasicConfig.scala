@@ -133,6 +133,14 @@ class EngineConfig {
   var enableCallbackFlow: Boolean = true
 
   @CommandLine.Option(
+    names = Array("--enable-output-buffer"),
+    description = Array(
+      "Connect output printed inside an ob_start/ob_get_clean window with the captured value (experimental)"
+    )
+  )
+  var enableOutputBuffer: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--enable-field-summary"),
     arity = "0..1",
     fallbackValue = "class",

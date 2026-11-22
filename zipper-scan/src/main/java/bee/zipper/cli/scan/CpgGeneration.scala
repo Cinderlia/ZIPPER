@@ -132,6 +132,11 @@ object CpgGeneration {
       new CallbackFlowPass(cpg).createAndApply()
     }
 
+    if (c.enableOutputBuffer) {
+      logger.info("Bridging values printed into an output buffer with the captured string")
+      new OutputBufferPass(cpg).createAndApply()
+    }
+
     // Twig templates are not part of the CPG, so a value printed through `|raw` has no sink. The pass only adds sink
     // nodes and a few data dependency edges, and is inert for projects that ship no Twig templates.
     if (c.enableTwigSinks) {

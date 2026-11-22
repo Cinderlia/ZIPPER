@@ -208,3 +208,16 @@ return $this->services->get(Performer::class)->run($formatter, 'formatter', comp
 ### 10e. 上传文件 → 静态回显（见第 7 条）
 
 `tools/bazar/fields/FileField.php:184 move_uploaded_file(...)`：`$_FILES` 不是 source，`move_uploaded_file` 只属 FileManipulation，`files/` 目录由 Web 服务器静态返回，不在“读库 → 回显”模型内。
+
+### 10c 进度（2026-11-22）
+
+已实现**输出缓冲捕获**这一半，作为实验开关 `--enable-output-buffer`（默认关，提交见下）：
+
+- 每个方法内 `ob_start()` 之后的第一个 `ob_get_clean()`/`ob_get_contents()`/`ob_end_clean()` 视为窗口终点；
+- 窗口内 `echo/print/print_r/printf/vprintf/var_dump/exit/die` 的实参 → 捕获调用（`$html = ob_get_clean()` 即 `$html`）；
+- 窗口内**目标可静态解析**的 `include/require`（字符串字面量、以 `.php` 结尾）→ 把被 include 文件里输出调用的实参也接到捕获值，一层；
+- 目标为变量的 include（如 `runFileInBuffer()` 里的 `include $___file`）跳过，避免把所有文件串进来。
+
+实测 yeswiki（全套 flags + `--enable-field-summary=class+global --enable-output-buffer`）：`Bridged 186 output buffer flows in 19 capture windows (4 without a capture call)`，第二段 14 → **15** 条，唯一新增是 `handlers/page/acls.php:84 echo → :99 $content = ob_get_clean() → :101 echo $content`——真实的捕获回传，不是噪声机制（来源仍是不重要的 `prefered_language` 链）。
+
+仍缺的一半：`include $___file`（`Performer::runFileInBuffer`）的目标是运行时拼出来的，需要把 `Performer::TYPES` 的目录规则 + `runFileInBuffer($file, $vars)` 的实参二者结合才能定位 formatter 文件；另外页面正文还要先过 10a。所以在 10a 与 include 目标解析完成前，CVE-2026-104466 仍出不来。
