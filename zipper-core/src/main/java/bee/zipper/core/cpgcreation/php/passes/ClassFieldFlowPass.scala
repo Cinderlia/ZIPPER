@@ -41,34 +41,52 @@ class ClassFieldFlowPass(cpg: Cpg) extends CpgPass(cpg) {
       }
     }
 
-    var edges       = 0
-    var skipped     = 0
-    val skippedKeys = mutable.ArrayBuffer.empty[String]
+    var edges         = 0
+    var skippedReads  = 0
+    var skippedWrites = 0
+    var bridgedFields = 0
+    val readKeys      = mutable.ArrayBuffer.empty[String]
+    val writeKeys     = mutable.ArrayBuffer.empty[String]
 
     definitions.foreach { case (key, writes) =>
       uses.get(key).foreach { reads =>
-        if (reads.size > maxUsesPerField) {
-          skipped += 1
-          if (skippedKeys.size < 10) skippedKeys += s"$key(${reads.size})"
-        }
-        val targets = reads.take(maxUsesPerField)
-        writes.foreach { value =>
-          targets.foreach { read =>
-            FeatureTagger.bind(builder, read, GlobalDataDependency)
-            builder.addEdge(value, read, EdgeTypes.REACHING_DEF)
-            edges += 1
+        // A field written from several places does not denote one value any more; pairing all of those writes with all
+        // reads mixes unrelated data (a login check flowing into an export, for example) and mostly yields noise.
+        if (writes.size > maxWritesPerField) {
+          skippedWrites += 1
+          if (writeKeys.size < 10) writeKeys += s"$key(${writes.size})"
+        } else {
+          bridgedFields += 1
+          if (reads.size > maxUsesPerField) {
+            skippedReads += 1
+            if (readKeys.size < 10) readKeys += s"$key(${reads.size})"
+          }
+          val targets = reads.take(maxUsesPerField)
+          writes.distinctBy(_.id).foreach { value =>
+            targets.foreach { read =>
+              FeatureTagger.bind(builder, read, GlobalDataDependency)
+              builder.addEdge(value, read, EdgeTypes.REACHING_DEF)
+              edges += 1
+            }
           }
         }
       }
     }
 
     logger.info(
-      s"Bridged $edges class field value flows over ${definitions.size} written fields " +
+      s"Bridged $edges class field value flows over $bridgedFields of ${definitions.size} written fields " +
         s"(${uses.size} read fields)"
     )
-    if (skipped > 0) {
+    if (skippedWrites > 0) {
       logger.warn(
-        s"$skipped class fields exceed $maxUsesPerField reads and are bridged partially: " + skippedKeys.mkString(", ")
+        s"$skippedWrites class fields are written from more than $maxWritesPerField places and are not bridged: " +
+          writeKeys.mkString(", ")
+      )
+    }
+    if (skippedReads > 0) {
+      logger.warn(
+        s"$skippedReads class fields exceed $maxUsesPerField reads and are bridged partially: " + readKeys
+          .mkString(", ")
       )
     }
   }
@@ -80,7 +98,7 @@ class ClassFieldFlowPass(cpg: Cpg) extends CpgPass(cpg) {
     for {
       f <- field
       t <- owner
-    } yield s"${t.fullName}::$$f"
+    } yield t.fullName + "::" + f
   }
 
   private def fieldName(fieldAccess: Call): Option[String] = {
@@ -113,5 +131,8 @@ class ClassFieldFlowPass(cpg: Cpg) extends CpgPass(cpg) {
 object ClassFieldFlowPass {
 
   /** A field may be read from many methods of the same class; the bound only guards the edge count. */
-  private val maxUsesPerField = 5000
+  private val maxUsesPerField = 200
+
+  /** A field written from several places no longer carries one value; bridging those writes mixes unrelated data. */
+  private val maxWritesPerField = 2
 }
