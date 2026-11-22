@@ -127,6 +127,12 @@ class EngineConfig {
   var enableTwigSinks: Boolean = false
 
   @CommandLine.Option(
+    names = Array("--enable-callback-flow"),
+    description = Array("Resolve PHP callbacks passed to preg_replace_callback, array_map and friends")
+  )
+  var enableCallbackFlow: Boolean = true
+
+  @CommandLine.Option(
     names = Array("--enable-field-summary"),
     arity = "0..1",
     fallbackValue = "class",

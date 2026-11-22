@@ -125,6 +125,13 @@ object CpgGeneration {
       new PhpIncludeScopePass(cpg).createAndApply()
     }
 
+    // A callable argument (`[$this, 'callback']`) is a value, not a call: without reconnecting it the callback body has no
+    // incoming call edge and looks unreachable, although the value it returns is what the higher order call produces.
+    if (c.enableCallbackFlow) {
+      logger.info("Resolving callbacks passed to higher order PHP functions")
+      new CallbackFlowPass(cpg).createAndApply()
+    }
+
     // Twig templates are not part of the CPG, so a value printed through `|raw` has no sink. The pass only adds sink
     // nodes and a few data dependency edges, and is inert for projects that ship no Twig templates.
     if (c.enableTwigSinks) {

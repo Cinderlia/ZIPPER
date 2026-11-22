@@ -152,3 +152,59 @@ phpMyFAQ 4.1.1 上单段 `sqlRead → Xss` 实测 **0 条**，两段也是 0 条
 4. 之后再补 Symfony Request 源（`$request->query->get()` 等），否则 phpMyFAQ 仍然没有 `default` 源。
 
 注：`.twig` 不进 CPG 也是 openemr CVE-2026-33303（`templates/patient/portal_login/print.html.twig:83`）连不上的同一原因（见问题 3）。
+
+---
+
+## 10. YesWiki 4.6.5：页面正文链的三个断点（P1/P2，2026-11-22 整理）
+
+启用 `--enable-field-summary=class+global` 后页面正文链路已能定位到具体断点（第二段 `sqlRead → Xss` 从 6 条到 14 条，但仍不含页面正文）。四个断点：
+
+### 10a. 数组字面量整体传递丢污点（P1，误报偏多，暂缓）
+
+`includes/services/PageManager.php` 的 `getOne()`：
+
+```php
+$page = $this->checkEntriesACL([$page], $tag, $userNameForCheckingACL)[0];
+```
+
+`[$page]` 作为实参传进方法再取 `[0]`，污点在这一跳丢失。最小复现：`/home/so/share/t-fg11`（`return ['body' => $_GET[$tag]]`）→ 0 条；`/home/so/share/t-fg12`（同一结构但返回标量 `$_GET[$tag]`）→ 1 条。
+
+- 收益：页面正文的读点能打开（`$this->page['body']` → 76 个 handler 读点、25 个 `echo ... Format(...)`），量级到几百条；顺带修 openemr 的 `create_portallogin.php:79`、`import_template.php:362`。
+- 代价/风险：数组当一个聚合值传，元素之间会混流（`$a['x']` 会继承 `$b['y']`），误报明显；需要“只桥同一字面量、同一形参的元素键”之类的约束才可控。
+- 状态：**用户决定暂缓**（“a 误报比较多，到时候再说”）。
+
+### 10b. callable 回调不可达（已修）
+
+`formatters/wakka.php:59`：
+
+```php
+$text = preg_replace_callback("/.../", [$this, 'callback'], $text);
+```
+
+第二个实参在 CPG 里是空 `Block`（前端把它降级成 `$tmp0[0] = $this; $tmp0[1] = "cb"` 这样的赋值块，自身 `code` 为空），回调方法 `YesWiki\WikiniFormatter->callback` 没有任何 `CALL`/`REF` 入边，于是 `formatters/wakka.php:422` 这个 sink 在图上不可达。
+
+已由新增 `CallbackFlowPass` 修复（`--enable-callback-flow`，默认开）：解析 callable 名字（字符串 / `[$this,'m']` / `'Cls::m'`），解析目标必须唯一（优先调用所在类，其次全库唯一同名），补 `CALL` 边 + 把 subject 实参的污点导到回调参数与参数读点。最小用例 `/home/so/share/t-cb`、`t-cb2`、`t-cb3` 均能出路径。
+
+### 10c. `Format()` 的返回值经输出缓冲回传（P1，未修）
+
+`handlers/page/show.php:65` 是 `echo $this->Format($this->page['body'], 'wakka', $this->GetPageTag());`，而 `Format()` 自身：
+
+```php
+// includes/YesWiki.php:825
+return $this->services->get(Performer::class)->run($formatter, 'formatter', compact('text'));
+```
+
+`Performer::run` → `runFileInBuffer()`：`ob_start()` + `extract($vars)` + `include $___file;`，formatter 文件里的 `return` / `$plugin_output_new` 才把内容带回。
+
+- 需要建模：服务定位器（`$this->services->get(...)`）→ `ob_start()`/`ob_get_clean()` 的缓冲区语义 → 动态 include 目标的返回值 → `extract()` 把实参数组摊成局部变量。
+- 影响：即使 10a 修好，`handlers/page/show.php:65`、`tools/templates/handlers/page/html.php:10`、`tools/rss/handlers/page/xml.php:18` 仍到不了 echo。
+- 规避：不追 `Format` 返回值，只认直接输出点 `handlers/page/css.php:15 echo $this->page['body']`、`handlers/page/raw.php:9`、`tools/bazar/handlers/page/raw.php:9`（这些只等 10a）。
+- 风险：容易把无关 include 的输出串进来，误报中低。
+
+### 10d. Twig `|raw` 仍是实验性（P2，见第 3、9 条）
+
+`--enable-twig-sinks` 能造出 sink 节点，但“data 数组 → 模板变量”这一跳没打通，最小用例仍 0 条。
+
+### 10e. 上传文件 → 静态回显（见第 7 条）
+
+`tools/bazar/fields/FileField.php:184 move_uploaded_file(...)`：`$_FILES` 不是 source，`move_uploaded_file` 只属 FileManipulation，`files/` 目录由 Web 服务器静态返回，不在“读库 → 回显”模型内。
