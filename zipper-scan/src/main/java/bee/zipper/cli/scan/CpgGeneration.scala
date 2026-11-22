@@ -111,6 +111,13 @@ object CpgGeneration {
       new PhpIncludeScopePass(cpg).createAndApply()
     }
 
+    // Twig templates are not part of the CPG, so a value printed through `|raw` has no sink. The pass only adds sink
+    // nodes and a few data dependency edges, and is inert for projects that ship no Twig templates.
+    if (c.enableTwigSinks) {
+      logger.info("Bridging Twig template output sinks")
+      new TwigRenderPass(cpg).createAndApply()
+    }
+
     if (c.enableGlobalDataDependency) {
       logger.info("Building global variable def-use chains")
       GlobalVariableFlowLayer.run(cpg, api.globalDefUse(lightweight = true))

@@ -121,6 +121,12 @@ class EngineConfig {
   var enableGlobalDataDependency: Boolean = false
 
   @CommandLine.Option(
+    names = Array("--enable-twig-sinks"),
+    description = Array("Model Twig template output (|raw) as an XSS sink (experimental)")
+  )
+  var enableTwigSinks: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--enable-object-data-dependency"),
     description = Array("Enable object data dependency analysis")
   )

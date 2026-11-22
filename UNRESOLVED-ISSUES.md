@@ -126,3 +126,29 @@ openemr 单段 `sqlRead → Xss` 过滤噪声后仍有 **3833 条**：
 | `0721514` | 报告里带上“构造 SQL 的那一行”（`$sql = "SELECT ..."`） |
 | `fc146e9` | SQL 源匹配大小写不敏感 + 常见 DB 包装（`sqlQuery`/`sqlStatement`/`fetchRecords`/`Execute` 等） |
 | `9878261` | sqlRead 源过滤：`query/execute/exec/prepare/fetch/fetchAll` 无可见 SQL 文本时不再当源（`$xpath->query()`、`$tpl->fetch()` 等噪声） |
+
+---
+
+## 9. phpMyFAQ：源与 sink 两头都断（Twig 未建模）（P1，当前暂停）
+
+phpMyFAQ 4.1.1 上单段 `sqlRead → Xss` 实测 **0 条**，两段也是 0 条。两头都断：
+
+- **源**：`grep -rhoE "\$_(GET|POST|REQUEST|COOKIE|SERVER)\b" /app/phpmyfaq --include=*.php` 零命中 → `default sources=0`。phpMyFAQ 4.x 用 Symfony HttpFoundation（`$request->query->get(...)` / `$request->request->get(...)`），超全局只出现在被排除的 `src/libs` 里。
+- **sink**：CPG 里只有 95 个 Xss sink，且全是报错/调试 `echo`（`src/phpMyFAQ/Core/Error.php:63-65`、`Database.php:105`、`Instance/Database/{Mysqli,PdoMysql}.php:376-378` 等）。真实页面输出全走 Twig（`{{ answer|raw }}`、`{{ renderComments|raw }}`），而 **`.twig` 不在 CPG 里**（`FILE` 节点只有 `.php`；php2cpg 不解析 Twig）。
+
+已实现的桥（**实验性，默认关闭**，需 `--enable-twig-sinks`）：
+- `zipper-core/src/main/java/bee/zipper/core/cpgcreation/php/passes/TwigRenderPass.scala`：从 `MetaData.ROOT` 起扫 `.twig`（跳过 `vendor,libs,node_modules,fonts`），用 `{{ ... }}` 正则取变量名与行号；再找 `loadTemplate('./faq.twig')` / `render($vars)` 这类模板引用，为每个 `|raw` 变量造一个合成 `echo` 调用（`code = "<twig 模板:行> {{ name|raw }}"`），把 PHP 侧 `$vars['name'] = ...` 的赋值右值用 `REACHING_DEF` 连到该调用，并把该调用接进所在方法的 CFG/AST。
+- 接线在 `zipper-scan/src/main/java/bee/zipper/cli/scan/CpgGeneration.scala`（`if (c.enableTwigSinks)`，开关在 `BasicConfig.scala`）。
+
+实测状态（**未打通**）：
+- phpMyFAQ 生成式跑（`--exclude-dirs=vendor,libs,fonts --enable-global-data-dependency --enable-twig-sinks`，输出 `/home/so/share/phpmyfaq-twig2`）：日志 `Bridged ... Twig sinks`，sink 数 95 → 1863，但 `sqlRead -> Xss: 0 paths`。
+- 最小复现 `/home/so/share/t-twig`（`$row = $stmt->fetch(); $vars["name"] = $row["name"]; $tpl = $twig->loadTemplate("./t.twig"); echo $tpl->render($vars);` + `tpl/t.twig` = `{{ name|raw }}`）：`Bridged 1 values into 1 Twig sinks`，`sql sources=2`、`Xss:2`、**`paths=0`**。
+- 即“合成 sink 节点已经建出来，但 taint 引擎不认为可达”。已确认不是持久化问题（必须走生成流程；对已存 CPG 用 `Cpg.withStorage(path,false)` + pass 的改动不会落盘）。
+
+**下一步（待办）**：
+1. 用 `$_POST` 源 + `{{ name|raw }}`（不经过 SQL）跑最小用例，判断是合成 sink 的 `ARGUMENT`/`CFG` 建模不被引擎接受，还是 `$row["name"]` 这层 def-use 断了；
+2. 若 sink 建模有问题，参考 `DefaultTaintAnalysis.scala:235-251` 的 `extractSinks`（probe = `CallArgumentSink` 的 arguments，sink = 该 call），核对合成节点的 `ARGUMENT` 边是否带 `ARGUMENT_INDEX`、是否需要真实 `METHOD_PARAMETER_IN`；
+3. 修好后重跑 phpMyFAQ，统计 6 条 4.1.1 CVE（CVE-2026-46367/46363/56736/46361/46360/85593）里能连上几条；
+4. 之后再补 Symfony Request 源（`$request->query->get()` 等），否则 phpMyFAQ 仍然没有 `default` 源。
+
+注：`.twig` 不进 CPG 也是 openemr CVE-2026-33303（`templates/patient/portal_login/print.html.twig:83`）连不上的同一原因（见问题 3）。
