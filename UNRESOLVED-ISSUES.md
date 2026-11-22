@@ -1,7 +1,8 @@
 # Zipper taint 分析：已知未修复问题清单
 
-记录时间：2026-11-21（容器 `php84-dev`，仓库 HEAD `9878261`）
-用途：本阶段排查 openemr / bWAPP / showdoc 时发现的、**尚未修复**的问题。每条都带最小复现和实测结果，方便以后接手。
+记录时间：2026-11-21 起（容器 `php84-dev`），2026-11-22 追加第 10、11 节
+用途：本阶段排查 openemr / bWAPP / showdoc / DVWA / phpMyFAQ / yeswiki 时发现的、**尚未修复**的问题。每条都带最小复现和实测结果，方便以后接手。
+已实现的功能开关见 `FEATURES.md`。
 
 复现工程都在 `/home/so/share/`（宿主 `/tmp/share/`），统一用
 `--custom-navi=/home/so/share/navi-read-xss.json`（单段 `sqlRead → Xss`）、
@@ -126,6 +127,12 @@ openemr 单段 `sqlRead → Xss` 过滤噪声后仍有 **3833 条**：
 | `0721514` | 报告里带上“构造 SQL 的那一行”（`$sql = "SELECT ..."`） |
 | `fc146e9` | SQL 源匹配大小写不敏感 + 常见 DB 包装（`sqlQuery`/`sqlStatement`/`fetchRecords`/`Execute` 等） |
 | `9878261` | sqlRead 源过滤：`query/execute/exec/prepare/fetch/fetchAll` 无可见 SQL 文本时不再当源（`$xpath->query()`、`$tpl->fetch()` 等噪声） |
+| `29c9a5d` | 修 `MemoryCache` 锁内求值导致的死锁（DVWA 卡在 memory def-use 阶段） |
+| `87c0671` | 新增本文件（未修问题清单） |
+| `4e6d2ed` → `d6cb55e` | 同类别 `$this->f` 字段桥（`--enable-field-summary=class`）：先是 key 里字段名丢失，后改为按 `类::字段` 分键并加限流 |
+| `121dfba` | `class+global`：把 `<global>` 文件的 `$this->f` 接到唯一类，并解析这类文件里 `$this->Method(...)` 的接收者 |
+| `e4104dd` | callable 回调解析（`--enable-callback-flow`，默认开） |
+| `370d354` | 输出缓冲捕获（`--enable-output-buffer`，实验） |
 
 ---
 
@@ -221,3 +228,19 @@ return $this->services->get(Performer::class)->run($formatter, 'formatter', comp
 实测 yeswiki（全套 flags + `--enable-field-summary=class+global --enable-output-buffer`）：`Bridged 186 output buffer flows in 19 capture windows (4 without a capture call)`，第二段 14 → **15** 条，唯一新增是 `handlers/page/acls.php:84 echo → :99 $content = ob_get_clean() → :101 echo $content`——真实的捕获回传，不是噪声机制（来源仍是不重要的 `prefered_language` 链）。
 
 仍缺的一半：`include $___file`（`Performer::runFileInBuffer`）的目标是运行时拼出来的，需要把 `Performer::TYPES` 的目录规则 + `runFileInBuffer($file, $vars)` 的实参二者结合才能定位 formatter 文件；另外页面正文还要先过 10a。所以在 10a 与 include 目标解析完成前，CVE-2026-104466 仍出不来。
+
+---
+
+## 11. 待办总表（2026-11-22 整理，按建议顺序）
+
+| # | 问题 | 优先级 | 现状 | 说明 |
+|---|---|---|---|---|
+| 10a | 数组字面量整体传递丢污点（`getOne` 的 `[$page][0]`） | P1 | 未做 | 收益最大（页面正文几百条 + openemr `create_portallogin.php:79`、`import_template.php:362`），但元素混流导致误报偏多，用户要求暂缓 |
+| 10c-2 | `Performer::runFileInBuffer` 的动态 include 目标解析 | P1 | 未做 | `include $___file`，需用 `Performer::TYPES` 的目录规则（`formatters/`、`handlers/`、`actions/`）+ 调用点实参定位文件；是 CVE-2026-104466 出路径的最后一跳 |
+| 10d / 3 / 9 | Twig `|raw` sink | P1 | 实验开关 `--enable-twig-sinks` | 能造 sink 节点，但“PHP 数组 → 模板变量”未打通，最小用例 0 条 |
+| 10e / 7 | 上传文件 → 静态回显 | P1（对该族 CVE） | 未做 | `$_FILES` 非 source、`move_uploaded_file` 属 FileManipulation、静态目录回显未建模；CVE-2026-104461 / showdoc 系列都卡在这 |
+| 4 | gad7：整库规模下引擎不展开 | P2 | 放弃 | CPG 里链齐全（探针证实），小工程能出 10 条 |
+| 5 | `import_template.php:362` | P2 | 未做 | `renderEditorHtml()` 参数进函数后到 `text()` 未连，疑与 10a 同源 |
+| 6 | 通用 DB 帮助函数让报告量大 | P2 | 部分缓解 | 噪声过滤只削 ~5%，大头是真 DB 包装（`library/options.inc.php` 一个文件 1181 条） |
+| 8 | Splendor 表/列桥依赖建表 DDL | P2 | 未做 | bWAPP 无 DDL，`database-schema.json` 为空 |
+| 3.3 误报 | `class+global` 字段桥的跨字段串链 | P2 | 有旋钮 | 已收紧（读点 ≤200、写点 ≤2、`<global>` 字段 ≤3 类）；openemr 仍新增约 100 条 `fpdf`/`options.inc.php` 噪声 |
