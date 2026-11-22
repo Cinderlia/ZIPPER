@@ -127,6 +127,12 @@ class EngineConfig {
   var enableTwigSinks: Boolean = false
 
   @CommandLine.Option(
+    names = Array("--enable-field-summary"),
+    description = Array("Bridge object field reads and writes inside the same class (experimental)")
+  )
+  var enableFieldSummary: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--enable-object-data-dependency"),
     description = Array("Enable object data dependency analysis")
   )

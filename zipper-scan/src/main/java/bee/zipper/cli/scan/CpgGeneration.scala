@@ -118,6 +118,11 @@ object CpgGeneration {
       new TwigRenderPass(cpg).createAndApply()
     }
 
+    if (c.enableFieldSummary) {
+      logger.info("Bridging object field reads and writes")
+      new ClassFieldFlowPass(cpg).createAndApply()
+    }
+
     if (c.enableGlobalDataDependency) {
       logger.info("Building global variable def-use chains")
       GlobalVariableFlowLayer.run(cpg, api.globalDefUse(lightweight = true))
