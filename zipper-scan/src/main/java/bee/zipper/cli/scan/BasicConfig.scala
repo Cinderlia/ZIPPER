@@ -128,9 +128,14 @@ class EngineConfig {
 
   @CommandLine.Option(
     names = Array("--enable-field-summary"),
-    description = Array("Bridge object field reads and writes inside the same class (experimental)")
+    arity = "0..1",
+    fallbackValue = "class",
+    description = Array(
+      "Bridge object field reads and writes across methods: `class` (same class only) " +
+        "or `class+global` (also include-scope files that read $this-> fields)"
+    )
   )
-  var enableFieldSummary: Boolean = false
+  var fieldSummary: String = ""
 
   @CommandLine.Option(
     names = Array("--enable-object-data-dependency"),

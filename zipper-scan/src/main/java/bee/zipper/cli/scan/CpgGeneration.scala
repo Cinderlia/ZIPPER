@@ -15,6 +15,20 @@ import scala.jdk.CollectionConverters.*
 object CpgGeneration {
   private val logger = LoggerFactory.getLogger(this.getClass)
 
+  private val FieldSummaryClass   = "class"
+  private val FieldSummaryGlobals = "class+global"
+
+  /** `--enable-field-summary` is a mode: bare flag means `class`, `class+global` also bridges `<global>` accesses. */
+  private def fieldSummaryMode(value: String): Option[String] =
+    Option(value).map(_.trim.toLowerCase).filter(_.nonEmpty).map {
+      case FieldSummaryClass   => FieldSummaryClass
+      case FieldSummaryGlobals => FieldSummaryGlobals
+      case other =>
+        throw new IllegalArgumentException(
+          s"unknown --enable-field-summary mode '$other' (expected '$FieldSummaryClass' or '$FieldSummaryGlobals')"
+        )
+    }
+
   /** create a new CPG or load from an existing CPG
     */
   def importCpg(basicConfig: BasicConfig): Option[Cpg] = {
@@ -118,9 +132,9 @@ object CpgGeneration {
       new TwigRenderPass(cpg).createAndApply()
     }
 
-    if (c.enableFieldSummary) {
-      logger.info("Bridging object field reads and writes")
-      new ClassFieldFlowPass(cpg).createAndApply()
+    fieldSummaryMode(c.fieldSummary).foreach { mode =>
+      logger.info(s"Bridging object field reads and writes ($mode)")
+      new ClassFieldFlowPass(cpg, includeGlobal = mode == FieldSummaryGlobals).createAndApply()
     }
 
     if (c.enableGlobalDataDependency) {
