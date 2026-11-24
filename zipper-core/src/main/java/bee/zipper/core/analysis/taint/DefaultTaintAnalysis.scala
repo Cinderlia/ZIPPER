@@ -135,7 +135,7 @@ class DefaultTaintAnalysis(
               logger.info(s"[origin] empty-sink ${locationOf(path.sink)}")
             }
           enhancedPaths ++ empty
-        } else enhancedPaths
+        } else validatedTaintPaths
       // step7. merge sinks that share a straight-line CFG segment, reporting their paths together
       val mergedPaths =
         if (enableControlStructure) sinkGroupMerger.merge(collectedPaths) else collectedPaths

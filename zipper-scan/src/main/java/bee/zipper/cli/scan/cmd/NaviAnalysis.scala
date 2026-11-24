@@ -209,9 +209,25 @@ object NaviAnalysis {
         })
         .toMap
 
+    /** `sqlRead` used as a sink means "a request value reached a database read". Those calls are exactly the SQL read
+      * sources resolved for the next segment, so sinking on the same call nodes keeps the join key aligned: before
+      * this, the selector reused the SQL-injection sink set (a handful of calls) and the second segment never linked.
+      */
+    def sqlReadSinks: Map[String, List[TaintSink]] = {
+      val readCalls   = sqlSources.collect { case call: Call => call }
+      val readCallIds = readCalls.map(_.id()).toSet
+      val fromSources = readCalls.map(call => DirectNodeSink(call): TaintSink)
+      val fromSinks = sqlSinks(SqlStatementKind.Read).values.flatten.toList.filter {
+        case CallArgumentSink(call, _) => !readCallIds.contains(call.id())
+        case _                         => true
+      }
+      val all = fromSources ++ fromSinks
+      if (all.isEmpty) sqlSinks(SqlStatementKind.Read) else Map("SqlRead" -> all)
+    }
+
     def resolveSinks(selector: String): Map[String, List[TaintSink]] =
       selector.trim.toLowerCase match {
-        case "sqlread" | "sql-read"   => sqlSinks(SqlStatementKind.Read)
+        case "sqlread" | "sql-read"   => sqlReadSinks
         case "sqlwrite" | "sql-write" => sqlSinks(SqlStatementKind.Write)
         case "sql" | "sqlquery"       => allSinks.filter { case (sinkKind, _) => sinkKind.toLowerCase.contains("sql") }
         case "fileread" | "file-read" | "file_read" =>

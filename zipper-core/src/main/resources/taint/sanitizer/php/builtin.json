@@ -86,7 +86,12 @@
       "date",
       "filter_var",
       "filter_input",
-      "gettype"
+      "gettype",
+      "escapeAttribute",
+      "escapeHTML",
+      "escapeHtml",
+      "escapeHTMLAttribute",
+      "escapeHtmlAttribute"
     ],
     "vulnSanitizer": {
       "Xss": {
