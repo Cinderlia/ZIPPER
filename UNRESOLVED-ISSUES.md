@@ -244,3 +244,31 @@ return $this->services->get(Performer::class)->run($formatter, 'formatter', comp
 | 6 | 通用 DB 帮助函数让报告量大 | P2 | 部分缓解 | 噪声过滤只削 ~5%，大头是真 DB 包装（`library/options.inc.php` 一个文件 1181 条） |
 | 8 | Splendor 表/列桥依赖建表 DDL | P2 | 未做 | bWAPP 无 DDL，`database-schema.json` 为空 |
 | 3.3 误报 | `class+global` 字段桥的跨字段串链 | P2 | 有旋钮 | 已收紧（读点 ≤200、写点 ≤2、`<global>` 字段 ≤3 类）；openemr 仍新增约 100 条 `fpdf`/`options.inc.php` 噪声 |
+| 12 | `$arr[$var]` 写入不产生内存定义（数组图缺边） | P2 | 未做 | `MemoryUtils.getMemPtrs` 的 `<operator>.indexAccess` 只认 `StringLiteral`/`IntLiteral` 下标，`$sComment[$plg_fundID] = $aRow['plg_comment']` 这类写入被丢，读点自然拿不到污点。ChurchCRM 实测（见 §12）：新增 sink 行 71、误报约 70%，唯一直接收益是 CVE-2026-40483（`PledgeEditor.php:734`）。建议做成默认关的开关 `--enable-index-write-flow` |
+
+---
+
+## 12. `$arr[$var]` 写入桥的收益/误报估算（2026-11-24，ChurchCRM 7.0.0 实测，未实现）
+
+**问题**：`MemoryUtils.getMemPtrs`（`zipper-core/.../reachingdef/mem/MemoryUtils.scala:47-57`）只为字面量下标造 `ArrayIndexPtr`；变量下标读写一律丢。读侧影响较小（读未知下标有整数组兜底），**写侧**则完全不产生内存定义，污点进不了数组。
+
+**复现**：`PledgeEditor.php:182-189`（`$rsAmounts = RunQuery($sSQL)` → `while ($aRow = mysqli_fetch_array($rsAmounts))` → `$sComment[$plg_fundID] = $aRow['plg_comment']`）→ `:715 foreach (...)` → `:734 value="<?= $sComment[$fun_id] ?>"`；CVE-2026-40483。
+
+**量化（探针 `Probe67.java`，CPG `/home/so/share/churchcrm-full/cpg.bin`，691,829 节点）**：
+
+| 指标 | 数量 |
+|---|---|
+| `$arr[...]` 写入点总数 | 12,658 |
+| 其中下标为字面量（已支持） | 10,569 |
+| 用变量下标的数组 | 162 个 |
+| 同文件 echo 读这些数组的行（潜在新 sink） | 90 行 |
+| 已在 `reg4-crm`(66 行) / `ext-crm`(203 行) 结果中 | 1 / 19 |
+| **全新 sink 行** | **71** |
+
+**误报构成**（对 90 行分类）：
+- 30 行（42%）输出已包 `escapeAttribute/escapeHTML/htmlspecialchars` → 硬误报；
+- 约 20 行（28%）是 `FamilyEditor.php:845-904` 的 `echo $aGenders[$iCount] == 0 ? "selected" : ""`，实际只输出常量 `"selected"` → 结构性误报；
+- 1 行 `(int)` 强转，另有一批 ID/编号回显（`EditEventTypes.php:210`、`EventNames.php:310/315/319`）；
+- 约 20 行像真字段回显（`GroupView.php:280/281`、`PledgeEditor.php:720-734`、`GeoPage.php:380`、`FamilyEditor.php:856/860`）。
+
+**结论**：相对 extract 桥（+137 行、噪声约 1/3、补上 5/6 条 CVE），`$arr[$var]` 桥规模更小（+71 行、flow 约 200–300）但噪声更高（约 70%），可用增量约 20 行，唯一明确收益是 CVE-2026-40483。**决定：暂不实现，记入待办**。
