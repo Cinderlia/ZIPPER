@@ -137,6 +137,13 @@ object CpgGeneration {
       new OutputBufferPass(cpg).createAndApply()
     }
 
+    // `extract($row)` defines the variables of a fetched database row; the row keys are unknown at compile time, so the
+    // variables have no reaching definition. Opt-in because every bridged variable is a guess about the column names.
+    if (c.enableExtractFlow) {
+      logger.info("Bridging extract() of database row arrays")
+      new ExtractFlowPass(cpg).createAndApply()
+    }
+
     // Twig templates are not part of the CPG, so a value printed through `|raw` has no sink. The pass only adds sink
     // nodes and a few data dependency edges, and is inert for projects that ship no Twig templates.
     if (c.enableTwigSinks) {

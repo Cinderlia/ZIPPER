@@ -133,6 +133,12 @@ class EngineConfig {
   var enableCallbackFlow: Boolean = true
 
   @CommandLine.Option(
+    names = Array("--enable-extract-flow"),
+    description = Array("Bridge `extract()` of a database row array with the variables it defines (experimental)")
+  )
+  var enableExtractFlow: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--enable-output-buffer"),
     description = Array(
       "Connect output printed inside an ob_start/ob_get_clean window with the captured value (experimental)"

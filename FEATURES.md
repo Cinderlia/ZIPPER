@@ -157,7 +157,25 @@ docker exec -it php84-dev bash -c 'cd /app && java -Xmx24g -Xss16m \
   `handlers/page/acls.php` 自己的捕获回传；`handlers/page/show.php:65 echo $this->Format(...)` 这类仍缺 include 目标解析。
 - 代价/误报：小（19 个窗口、186 条边只多 1 条路径）。
 
-### 3.6 `--enable-twig-sinks`（实验，默认关）
+### 3.6 `--enable-extract-flow`（实验，默认关）
+
+PHP 的 `extract($row)` 把数据库一行变成一组局部变量：`$aRow = mysqli_fetch_array($rs)` 之后 `extract($aRow)`，
+页面就能直接 `echo $per_Facebook`。行的列名只有运行时才知道，前端建不出这些变量，reaching-def 也就没有从取行到
+输出的边。本开关补这条边，两道限制：
+
+- **只桥数据库取行结果**：被 extract 的值本身是取行调用（`mysqli_fetch_array`、`PDOStatement::fetch`、
+  `fetch_assoc` …），或是从这种调用赋值的变量。项目把请求数据/配置数组 extract 进作用域的情况不动；
+- **变量必须没有更早的定义**：形参、或在本次使用之前的赋值（`$name = $_POST['name']`、`$name = legacyFilterInput(...)`）
+  都会让这个变量跳过，因为那时打印的已经不是行里的值。
+
+- 用法：`taint ... --enable-extract-flow`（生成 CPG 与 `--load-cpg` 两种模式都生效，`--load-cpg` 时在内存里加边）。
+- 收益（ChurchCRM 7.0.0）：`Bridged 8821 extract() flows over 189 row extractions`，第二段 76 → 885 条 /
+  76 → 203 个 sink 行，6 条目标 CVE 里 5 条的 sink 出现（`PersonView.php:424/430/436/845`、`FamilyEditor.php:635/652`）。
+- 代价/误报：新增 137 个 sink 行里约 15% 的输出已带 `escape*`/`htmlspecialchars`、约 18% 打印的是数值变量
+  （`echo $iEventID`、`echo $nEstPrice`），合计约三分之一偏噪声；列名是猜的，抽取变量名与真实列名不一致时不会误报，
+  一致时才可能带出无效路径。
+
+### 3.7 `--enable-twig-sinks`（实验，默认关）
 
 按 `.twig` 模板里的 `{{ var|raw }}` 造出合成 echo sink。**目前只造 sink，不打通“PHP 数组 → 模板变量”**，
 最小用例仍 0 条路径，暂不建议开。

@@ -72,6 +72,11 @@ class TaintModule extends AppModule {
         if (basicConfig.engineConfig.enableIncludeScope && basicConfig.projectConfig.isLoadingCpgMode) {
           new bee.zipper.core.cpgcreation.php.passes.PhpIncludeScopePass(cpg).createAndApply()
         }
+        // The extract bridge only adds edges, so it is safe (and needed) when the CPG was created by an earlier run.
+        if (basicConfig.engineConfig.enableExtractFlow && basicConfig.projectConfig.isLoadingCpgMode) {
+          logger.info("Bridging extract() of database row arrays")
+          new bee.zipper.core.cpgcreation.php.passes.ExtractFlowPass(cpg).createAndApply()
+        }
         val projectConfig = basicConfig.projectConfig
         val api           = Api.create(cpg, basicConfig.engineConfig.enhancedValueSetAnalysis)
         // Only apply PHP passes when creating a new CPG
