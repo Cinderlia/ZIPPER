@@ -44,7 +44,10 @@
         { "name": "fetchSingleValue" },
         { "name": "fetchTableColumn" },
         { "name": "dbQuery" },
-        { "name": "db_select" }
+        { "name": "db_select" },
+        { "name": "runQuery" },
+        { "name": "runQueryArray" },
+        { "name": "runQuerySingleResult" }
       ],
       "methods": [
         { "typeName": null, "receiverName": null, "methodName": "getAll" },
@@ -56,7 +59,10 @@
         { "typeName": null, "receiverName": null, "methodName": "fetchAssoc" },
         { "typeName": null, "receiverName": null, "methodName": "fetchRecords" },
         { "typeName": null, "receiverName": null, "methodName": "fetchSingleValue" },
-        { "typeName": null, "receiverName": null, "methodName": "fetchTableColumn" }
+        { "typeName": null, "receiverName": null, "methodName": "fetchTableColumn" },
+        { "typeName": null, "receiverName": null, "methodName": "runQuery" },
+        { "typeName": null, "receiverName": null, "methodName": "runQueryArray" },
+        { "typeName": null, "receiverName": null, "methodName": "runQuerySingleResult" }
       ]
     }
   }
