@@ -244,6 +244,7 @@ return $this->services->get(Performer::class)->run($formatter, 'formatter', comp
 | 6 | 通用 DB 帮助函数让报告量大 | P2 | 部分缓解 | 噪声过滤只削 ~5%，大头是真 DB 包装（`library/options.inc.php` 一个文件 1181 条） |
 | 8 | Splendor 表/列桥依赖建表 DDL | P2 | 未做 | bWAPP 无 DDL，`database-schema.json` 为空 |
 | 3.3 误报 | `class+global` 字段桥的跨字段串链 | P2 | 有旋钮 | 已收紧（读点 ≤200、写点 ≤2、`<global>` 字段 ≤3 类）；openemr 仍新增约 100 条 `fpdf`/`options.inc.php` 噪声 |
+| 13 | ORM / PDO 预处理语句不被识别为读库源 | P1 | 未做 | `$con->prepare($sql)` + `$stmt->fetch()` 不在 `sqlQueries` 名单，加了也会被 `ambiguousExecutorNames` 挡；另有 `hydrate($row)` 写 `$this->f` 与静态属性两层传播缺口。ChurchCRM 3 条 CVE 卡在这（40593 `UserEditor.php:399`、39336 的配置值链）。详见 §13，推荐方案 B（按 `PDOStatement` 接收者类型认源） |
 | 12 | `$arr[$var]` 写入不产生内存定义（数组图缺边） | P2 | 未做 | `MemoryUtils.getMemPtrs` 的 `<operator>.indexAccess` 只认 `StringLiteral`/`IntLiteral` 下标，`$sComment[$plg_fundID] = $aRow['plg_comment']` 这类写入被丢，读点自然拿不到污点。ChurchCRM 实测（见 §12）：新增 sink 行 71、误报约 70%，唯一直接收益是 CVE-2026-40483（`PledgeEditor.php:734`）。建议做成默认关的开关 `--enable-index-write-flow` |
 
 ---
@@ -272,3 +273,45 @@ return $this->services->get(Performer::class)->run($formatter, 'formatter', comp
 - 约 20 行像真字段回显（`GroupView.php:280/281`、`PledgeEditor.php:720-734`、`GeoPage.php:380`、`FamilyEditor.php:856/860`）。
 
 **结论**：相对 extract 桥（+137 行、噪声约 1/3、补上 5/6 条 CVE），`$arr[$var]` 桥规模更小（+71 行、flow 约 200–300）但噪声更高（约 70%），可用增量约 20 行，唯一明确收益是 CVE-2026-40483。**决定：暂不实现，记入待办**。
+
+---
+
+## 13. ORM / PDO 预处理语句不被识别为读库源（2026-11-24，ChurchCRM 7.0.0，未实现）
+
+**现象**：应用用 ORM 取数时，第二段（`sqlRead → Xss`）没有起点。ChurchCRM 里 6 条 CVE 有 3 条因此打不通（CVE-2026-40593 `UserEditor.php:399`、CVE-2026-39336 的 `DirectoryReports.php:227..251` 等）。
+
+**链的实际形态**（三条边，只有第一条在我们模型里有）：
+
+```php
+// ① 应用调用点：UserEditor.php:190
+$user = UserQuery::create()->findPk($iPersonID);
+$sUserName = $user->getUserName();                 // :194
+echo '... value="' . $sUserName . '">';            // :399  ← sink
+
+// ② ORM 基类里才是真 SQL（ChurchCRM/model/ChurchCRM/Base/UserQuery.php:349-372 findPkSimple）
+$sql  = 'SELECT ... usr_UserName ... FROM user_usr WHERE usr_per_ID = :p0';
+$stmt = $con->prepare($sql);
+$stmt->execute();
+$row  = $stmt->fetch(PDO::FETCH_NUM);
+$obj  = new ChildUser(); $obj->hydrate($row);
+
+// ③ 落到对象字段 / 读回（Base/User.php）
+$this->usr_username = $columnValue;                // :2107，$columnValue = $row[$rowIndex]
+public function getUserName() { return $this->usr_username; }   // :867
+```
+
+**三处断点**：
+
+1. **源名单按名字精确匹配**：`TaintSourceSearcher.locateSqlQueryCalls` 只认 `sqlQueries`（`taint/source/php/builtin.json`）里的名字（`mysqli_query`、`RunQuery`、`formFetch`、`sqlStatement`…）。ORM 这里叫 `$con->prepare()` / `$stmt->fetch()`，都不在名单里。
+2. **歧义过滤再挡一层**：`TaintSourceSearcher.ambiguousExecutorNames = {query, execute, exec, prepare, fetch, fetchall}`（`sourcesink/TaintSourceSearcher.scala:283`）要求调用里能看到 SQL 字面量（`SqlStatementClassifier.kindOfCall` 沿局部变量找）才认；`$stmt->fetch(PDO::FETCH_NUM)` 自身看不到 SQL → 被丢。**实测**：把 `prepare/fetch/fetchAll/execute/query` 加进 `sqlQueries.methods` 重跑，`UserEditor.php:399` 仍然 0（ChurchCRM CPG，日志 `/home/so/share/orm-crm.log`，结果 `/home/so/share/orm-crm`；注意该 CPG 已含 extract 桥边）。
+3. **就算源出来了，传播还缺三段**：`$row` 变量下标数组（§12）、`$obj->hydrate($row)` 跨方法写 `$this->f`（字段桥只覆盖同类 `$this->f` 且要求类型可定）、`->getUserName()` 返回值（返回传播有，起点已断）。`SystemConfig::getValue()`（39336）还多一层 `private static ?array $configs` 静态类属性，我们只桥了 `$GLOBALS`/超全局。
+
+**为什么当初不把 `query/execute/fetch` 当源**：PHP 里 `$xpath->query()`、`$tpl->fetch()`、`$q->execute()` 同名，全部当源会显著抬高误报——这正是 `9878261` 加 `ambiguousExecutorNames` 的原因。ORM 属于被误伤的一类。
+
+**候选方案**：
+
+| 方案 | 做法 | 代价 |
+|---|---|---|
+| A. ORM 方法当源 | `sqlQueries.methods` 加 `findPk/findOne/findPks/find/findOneBy`，返回对象整体视为污染 | 一行配置；但该批生成类里 `findPk` 就有 622 个定义，所有 getter 全变污染，误报极大 |
+| B. 认 PDO 语句链（推荐） | `$stmt = $con->prepare($sql)`（能分类出 `SELECT`）→ 该 `$stmt` 的 `fetch/fetchAll/fetchObject` 才是读源；再把 `hydrate($row)` 的 `$this->f = $row[i]` 标为“字段来自库”，getter 返回即污染 | 需按**接收者类型**（`PDOStatement`/`ConnectionInterface`）而非名字判定，避免误伤 XML/模板；工作量中等，受益面覆盖所有裸 PDO 应用 |
+| C. 应用层 shim | 给 ORM 调用包一层可识别函数 | 要改被测代码，benchmark 不接受 |
