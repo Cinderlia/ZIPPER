@@ -77,6 +77,12 @@ class TaintModule extends AppModule {
           logger.info("Bridging extract() of database row arrays")
           new bee.zipper.core.cpgcreation.php.passes.ExtractFlowPass(cpg).createAndApply()
         }
+        // Same for the template sinks: they only add sink nodes and edges, so a CPG built by an earlier run can gain
+        // them without being regenerated.
+        if (basicConfig.engineConfig.enableTemplateSinks && basicConfig.projectConfig.isLoadingCpgMode) {
+          logger.info("Bridging template and script sinks")
+          new bee.zipper.core.cpgcreation.php.passes.TemplateSinkPass(cpg).createAndApply()
+        }
         val projectConfig = basicConfig.projectConfig
         val api           = Api.create(cpg, basicConfig.engineConfig.enhancedValueSetAnalysis)
         // Only apply PHP passes when creating a new CPG
@@ -426,7 +432,19 @@ object TaintResult {
     sinkSet: Seq[String] = Seq.empty
   )
 
-  case class AnalysisSummary(clusterSize: Int, allVulns: Int, clusters: Seq[Cluster])
+  case class AnalysisSummary(
+    clusterSize: Int,
+    allVulns: Int,
+    clusters: Seq[Cluster],
+    command: String = AnalysisSummary.currentCommand
+  )
+
+  object AnalysisSummary {
+
+    /** the exact java invocation that produced the report, so that a run can be reproduced */
+    def currentCommand: String =
+      "java " + sys.props.getOrElse("sun.java.command", "<unknown>")
+  }
 
   implicit val pathElementEncoder: Encoder[PathElement]     = deriveEncoder
   implicit val vulnerabilityEncoder: Encoder[Vulnerability] = deriveEncoder

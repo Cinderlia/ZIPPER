@@ -245,6 +245,7 @@ return $this->services->get(Performer::class)->run($formatter, 'formatter', comp
 | 8 | Splendor 表/列桥依赖建表 DDL | P2 | 未做 | bWAPP 无 DDL，`database-schema.json` 为空 |
 | 3.3 误报 | `class+global` 字段桥的跨字段串链 | P2 | 有旋钮 | 已收紧（读点 ≤200、写点 ≤2、`<global>` 字段 ≤3 类）；openemr 仍新增约 100 条 `fpdf`/`options.inc.php` 噪声 |
 | 13 | ORM / PDO 预处理语句不被识别为读库源 | P1 | 未做 | `$con->prepare($sql)` + `$stmt->fetch()` 不在 `sqlQueries` 名单，加了也会被 `ambiguousExecutorNames` 挡；另有 `hydrate($row)` 写 `$this->f` 与静态属性两层传播缺口。ChurchCRM 3 条 CVE 卡在这（40593 `UserEditor.php:399`、39336 的配置值链）。详见 §13，推荐方案 B（按 `PDOStatement` 接收者类型认源） |
+| 14 | 包装式请求 API 与项目级净化包装（Symfony / phpMyFAQ） | P1 | 源侧已修，传播侧未做 | `PHPTaintSourceSearcher.requestSources()` 原先只认超全局，`methods` 配置进不了 default 源（已改为 `superGlobalFetching ++ methodCalls`）；builtin 的 `PHP.methods` 补了 26 条 receiver 限定条目（`$request`/`$this->request` 的 `getContent`，以及 `->{query,request,cookies,headers,attributes,files}->get|all`），`genericSanitizer` 补 `filterVar`/`filterInput`。phpMyFAQ 实测 `default sources=292` 但仍 0 条路径：值要跨 `json_decode` → 实体 setter → repository 读库 → getter → `render(file:, context:)` 四跳，对象字段/实体 getter 未建模是最后一环。详见 §14 |
 | 12 | `$arr[$var]` 写入不产生内存定义（数组图缺边） | P2 | 未做 | `MemoryUtils.getMemPtrs` 的 `<operator>.indexAccess` 只认 `StringLiteral`/`IntLiteral` 下标，`$sComment[$plg_fundID] = $aRow['plg_comment']` 这类写入被丢，读点自然拿不到污点。ChurchCRM 实测（见 §12）：新增 sink 行 71、误报约 70%，唯一直接收益是 CVE-2026-40483（`PledgeEditor.php:734`）。建议做成默认关的开关 `--enable-index-write-flow` |
 
 ---
@@ -315,3 +316,26 @@ public function getUserName() { return $this->usr_username; }   // :867
 | A. ORM 方法当源 | `sqlQueries.methods` 加 `findPk/findOne/findPks/find/findOneBy`，返回对象整体视为污染 | 一行配置；但该批生成类里 `findPk` 就有 622 个定义，所有 getter 全变污染，误报极大 |
 | B. 认 PDO 语句链（推荐） | `$stmt = $con->prepare($sql)`（能分类出 `SELECT`）→ 该 `$stmt` 的 `fetch/fetchAll/fetchObject` 才是读源；再把 `hydrate($row)` 的 `$this->f = $row[i]` 标为“字段来自库”，getter 返回即污染 | 需按**接收者类型**（`PDOStatement`/`ConnectionInterface`）而非名字判定，避免误伤 XML/模板；工作量中等，受益面覆盖所有裸 PDO 应用 |
 | C. 应用层 shim | 给 ORM 调用包一层可识别函数 | 要改被测代码，benchmark 不接受 |
+
+## 14. 包装式请求 API（Symfony Request）与项目级净化包装（2026-11-26，phpMyFAQ 4.1.1，部分实现）
+
+用户要求“只补 sink、先不动源”之后，实测发现 phpMyFAQ 的 `default sources` 一直是 0，根因不在
+模板 sink，而在源侧的 API 形态：
+
+| 环节 | 现状 | 处理 |
+|---|---|---|
+| `$request->getContent()` / `$request->query->get('x')` | 历史实现里 `requestSources()` 只返回超全局，`methods` 配置永远进不了 default 段 | 已改 `TaintSourceSearcher.requestSources()` 为 `(superGlobalFetching ++ methodCalls).distinct` |
+| 源名单 | builtin 的 `PHP.methods` 原为空 | 补 26 条，全部 receiver 限定（不放开裸 `get`/`all`，否则 `->get(` 854 处会放大 3.4 倍并匹配配置/集合 getter） |
+| `Filter::filterVar($v, FILTER_SANITIZE_*)`、`html_entity_decode` | 项目自己的净化包装不在名单，已净化值仍被当脏 | `genericSanitizer` 补 `filterVar`/`filterInput`（仍是按名字匹配，跨项目通用名有误伤风险） |
+| `$faqEntity->setQuestion($v)` → 实体字段 → `getQuestion()` | 对象字段写读未建模 | **未做**，见 §3.3 字段桥的 class+global 限制 |
+| `render(file: '/faq.twig', context: [...])` | 已由 `--enable-template-sinks` 造出模板 sink（159 个、1541 条值桥接） | 已完成 |
+
+实测（同一 CPG `/home/so/share/phpmyfaq-twig2/cpg.bin`）：
+
+| 组合 | default sources | `default -> Xss` | `sqlRead -> Xss` |
+|---|---|---|---|
+| 只带超全局 | 0 | 0 | 0 |
+| 加 Symfony Request methods（receiver 白名单） | 292 | 0 | 0 |
+
+结论：源与 sink 两端都已就位，中间还差“请求值 → 实体对象字段 → 读库 → 模板上下文”的跨对象传播，
+补 §3.3/§13 的字段传播后这条链才有机会连通。

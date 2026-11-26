@@ -116,7 +116,9 @@ class PHPTaintSourceSearcher(
         directSuperGlobalFetching ++ indirectSuperGlobalFetching
       else
         directSuperGlobalFetching
-    superGlobalFetching.distinct
+    // Wrapper APIs (e.g. Symfony Request::query->get()) are only reachable through the request
+    // entry as well, so they belong to the same default source set when the spec names them.
+    (superGlobalFetching ++ methodCalls).distinct
   }
 
   private def identifySourcesAndWrappers(): (List[CfgNode], List[Method]) = {

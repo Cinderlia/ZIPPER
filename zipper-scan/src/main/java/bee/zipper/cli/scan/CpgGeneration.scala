@@ -151,6 +151,13 @@ object CpgGeneration {
       new TwigRenderPass(cpg).createAndApply()
     }
 
+    // Sinks that live outside the PHP code: `|raw` output in Twig templates and DOM writes in script files. The pass
+    // only adds sink nodes and edges, so it is inert for projects that ship neither.
+    if (c.enableTemplateSinks) {
+      logger.info("Bridging template and script sinks")
+      new TemplateSinkPass(cpg).createAndApply()
+    }
+
     fieldSummaryMode(c.fieldSummary).foreach { mode =>
       logger.info(s"Bridging object field reads and writes ($mode)")
       new ClassFieldFlowPass(cpg, includeGlobal = mode == FieldSummaryGlobals).createAndApply()

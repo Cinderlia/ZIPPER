@@ -127,6 +127,14 @@ class EngineConfig {
   var enableTwigSinks: Boolean = false
 
   @CommandLine.Option(
+    names = Array("--enable-template-sinks"),
+    description = Array(
+      "Model Twig templates and script files as XSS sinks, bridging them from the values a page passes to them"
+    )
+  )
+  var enableTemplateSinks: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--enable-callback-flow"),
     description = Array("Resolve PHP callbacks passed to preg_replace_callback, array_map and friends")
   )

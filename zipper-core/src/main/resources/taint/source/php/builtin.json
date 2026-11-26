@@ -30,7 +30,138 @@
       }
     ],
     "functions": [],
-    "methods": [],
+        "methods": [
+      {
+        "typeName": null,
+        "receiverName": "$request",
+        "methodName": "getContent"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->query",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->query",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->request",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->request",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->cookies",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->cookies",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->headers",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->headers",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->attributes",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->attributes",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->files",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$request->files",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request",
+        "methodName": "getContent"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->query",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->query",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->request",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->request",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->cookies",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->cookies",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->headers",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->headers",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->attributes",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->attributes",
+        "methodName": "all"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->files",
+        "methodName": "get"
+      },
+      {
+        "typeName": null,
+        "receiverName": "$this->request->files",
+        "methodName": "all"
+      }
+    ],
     "sqlQueries": {
       "functions": [
         { "name": "sqlQuery" },

@@ -87,6 +87,8 @@
       "filter_var",
       "filter_input",
       "gettype",
+      "filterVar",
+      "filterInput",
       "escapeAttribute",
       "escapeHTML",
       "escapeHtml",
