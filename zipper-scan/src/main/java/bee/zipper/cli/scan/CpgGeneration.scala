@@ -144,6 +144,11 @@ object CpgGeneration {
       new ExtractFlowPass(cpg).createAndApply()
     }
 
+    // A cast keeps the value it carries. Without this edge a request value written as `(int) $_GET['id']` loses its
+    // dependencies and the write it feeds is reported as unreachable from any source.
+    logger.info("Bridging type casts")
+    new CastFlowPass(cpg).createAndApply()
+
     // Twig templates are not part of the CPG, so a value printed through `|raw` has no sink. The pass only adds sink
     // nodes and a few data dependency edges, and is inert for projects that ship no Twig templates.
     if (c.enableTwigSinks) {

@@ -256,7 +256,11 @@ object NaviAnalysis {
       * write is an application level call such as `$db->exec($sql)` or `$link->query($sql)` whose statement is only
       * visible through a local variable.
       */
-    val looseWriteNames: Set[String] = Set(
+    /** Calls that execute a statement, whatever their receiver type: application level database wrappers
+      * (`$db->query(...)`, `$db->exec($sql)`) are not typed `PDO`/`mysqli` in the CPG, so the name + statement
+      * classification decides instead of the declared receiver type.
+      */
+    val sqlExecutorNames: Set[String] = Set(
       "query",
       "exec",
       "execute",
@@ -282,28 +286,34 @@ object NaviAnalysis {
       "sqlquery",
       "sqlstatement",
       "multi_query",
-      "real_query"
+      "real_query",
+      "unbufferedquery",
+      "executequery"
     )
 
-    /** Write sinks for the second-order SQL chains: any executor call whose statement classifies as a write, even when
-      * the call name is too generic (or the receiver type is unknown) for the strict SQL sink list.
+    /** SQL write sinks resolved by call name and statement kind. Used for every write selector: the strict
+      * type-annotated sink list misses application level wrappers such as `$db->query(...)`, which is the usual shape
+      * of an injection point in PHP applications.
       */
-    def looseSqlWriteSinks: Map[String, List[TaintSink]] = {
+    def nameBasedSqlWriteSinks: Map[String, List[TaintSink]] = {
       val calls = cpg.call
-        .filter(call => looseWriteNames.contains(call.name.toLowerCase))
+        .filter(call => sqlExecutorNames.contains(call.name.toLowerCase))
         .filter(call => SqlStatementClassifier.kindOfCall(call).contains(SqlStatementKind.Write))
         .toList
-      val extra = calls
-        .filterNot(call => SqlStatementClassifier.kindOfCall(call).exists(_ == SqlStatementKind.Read))
-        .map(call => CallArgumentSink(call, call.argument.toList): TaintSink)
-      if (extra.isEmpty) sqlSinks(SqlStatementKind.Write) else Map("SqlWriteLoose" -> extra)
+      Map("SqlWrite" -> calls.map(call => CallArgumentSink(call, call.argument.toList): TaintSink))
     }
+
+    /** Write sinks for the second-order SQL chains: same resolution as `sqlWrite`, kept as a separate selector name so
+      * olderchain configurations keep working.
+      */
+    def looseSqlWriteSinks: Map[String, List[TaintSink]] =
+      nameBasedSqlWriteSinks.map { case (_, sinks) => ("SqlWriteLoose", sinks) }
 
     def resolveSinks(selector: String): Map[String, List[TaintSink]] =
       selector.trim.toLowerCase match {
         case "sqlread" | "sql-read"                           => sqlReadSinks
         case "sqlwriteloose" | "sql-write-loose" | "sqlloose" => looseSqlWriteSinks
-        case "sqlwrite" | "sql-write"                         => sqlSinks(SqlStatementKind.Write)
+        case "sqlwrite" | "sql-write"                         => nameBasedSqlWriteSinks
         case "sql" | "sqlquery" => allSinks.filter { case (sinkKind, _) => sinkKind.toLowerCase.contains("sql") }
         case "fileread" | "file-read" | "file_read" =>
           Map("FileRead" -> fileReadCalls.map(call => CallArgumentSink(call, call.argumentOption(1).toList)))

@@ -215,8 +215,12 @@ class PathFilter(
           // Keep context-dependent XSS encoders in the report; they may be safe in one output context and unsafe in another.
           true
         case call: Call =>
+          // A cast around a request value is not a SQL neutralizer: `$db->query("... " . (int) $_GET['id'])` still
+          // shows the request value reaching the write, which is what the injection chains report. For output kinds the
+          // cast stays a sanitizer.
+          val castKeepsFlow = call.name == Operators.cast && taintPath.kind.toLowerCase.contains("sql")
           if (
-            typeSanitizerNames.contains(call.name) &&
+            typeSanitizerNames.contains(call.name) && !castKeepsFlow &&
             !(taintPath.kind.equalsIgnoreCase(VulnKind.Xss) && TaintPathFilters.isReliableXssValueFilter(call.name))
           )
             return false

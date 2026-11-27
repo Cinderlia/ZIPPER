@@ -67,11 +67,13 @@ java -Xmx24g -jar zipper-scan/target/zipper-scan-jar-with-dependencies.jar taint
 |---|---|
 | 任意漏洞类型名 | `Xss`、`SqlInjection`、`CmdInjection`、`CodeInjection`、`FileInclusion`、`FileManipulation`、`ObjectInjection`、`Ssrf`、`LogicFlaws`（大小写不敏感，来自 `taint/sink/php/builtin.json`） |
 | `sqlRead` | 第一段终点：既是“读库调用被请求值触及”的 sink，又和第二段的 source 是**同一个调用节点**（拼接依赖这一点） |
-| `sqlWrite` | 严格写点：只有语句能被判定为 `INSERT/UPDATE/DELETE/...`，且调用落在 `PDO`/`mysqli` 等已知类型上才算 |
-| `sqlWriteLoose` | 放宽写点：调用名属于 26 个数据库执行器（`query/exec/execute/prepare/bindParam/bindValue/mysqli_*/pg_query/sqlite_*/runQuery/...`）**且**语句经局部变量定义可判定为写，不要求接收者类型。**仅用于二次 SQL 两条链** |
+| `sqlWrite` | 写点：调用名属于数据库执行器（`query/exec/execute/prepare/.../runQuery`）**且**语句能被判定为 `INSERT/UPDATE/DELETE/...`。按名字与语句判定，不要求接收者类型：应用层数据库包装（`$db->query(...)`）才是注入点最常见的形态 |
+| `sqlWriteLoose` | 与 `sqlWrite` 同一解析规则，保留这个名字只为兼容旧配置（报告里 `kind` 记为 `SqlWriteLoose`）。**仅用于二次 SQL 两条链** |
 | `sql` / `sqlQuery` | 所有 SQL 类 sink（读 + 写） |
 
-> 为什么二次 SQL 用 `sqlWriteLoose`：应用里典型的二次 SQL 是 `$sql = "INSERT INTO blog ..."; $db->exec($sql);`，严格口径因为没有 `PDO` 类型信息而漏掉。bWAPP 的 `sqli_12.php:162 $db->exec($sql)`（Stored SQLite 页）只在放宽口径下出现；放宽后 bWAPP `read-to-write` 从 16 条升到 18 条，且不丢原有命中。
+> 写点为什么按名字解析：`$db->query("UPDATE ...")` 里的 `$db` 是框架自己的数据库类，CPG 里没有 `PDO`/`mysqli` 类型信息，按类型匹配会让整类注入点消失（PhoenixCart 的 7 个 `set_flag.php` 全部漏掉）。
+>
+> 数值强转的口径：`(int) $_GET['id']` 在 SQL sink 上不再中断数据流，请求值到写语句的链路照常报告（`PathFilter` 只对 XSS 等输出类型保留 cast 作为净化）。这类链路在“请求值是否真的能改变 SQL 结构”上需要人工判断。
 
 ---
 
@@ -230,7 +232,7 @@ navi[xss-second-order] joined: 104 paths (6 linked, 101 from empty intermediate 
 5. **不要依赖 `sink` 字符串里的源码**：用 `at` 的 `file:line` 回读源码。
 6. **比较不同应用的数字时必须固定**：同一 jar、同一 `--custom-source`、同一开关集合（尤其 `--enable-template-sinks`、`--enable-extract-flow`）。
 7. `at` / `sink` 是**相对源码根**的路径，换版本会变，不要把它当 CVE 的稳定主键；主键请用 (CVE 编号, 该版本的 file:line)。
-8. 二次 SQL 想让 `read-to-write` 有结果，必须用内置默认链（`sqlWriteLoose`）；若你把哪条链改成 `sqlWrite`，结果会退化到严格口径。
+8. `sqlWrite` 与 `sqlWriteLoose` 如今同义，两者都带上“数值强转不中断 SQL 链路”的口径；下游统计一次注入时需把经 `(int)`/`(float)` 强转的链路单独计数，它们说明请求值到达了写语句但不一定能改变 SQL 结构。
 
 ---
 

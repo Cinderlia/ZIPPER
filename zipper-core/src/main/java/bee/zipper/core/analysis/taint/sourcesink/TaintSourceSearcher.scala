@@ -369,16 +369,22 @@ class PHPTaintSourceSearcher(
   }
 
   private def identifyTypeSanitizedRequestNames(): Set[String] = {
-    val castBasedSanitization = cpg
-      .call(Operators.cast)
-      .filter(c => c.argumentOption(1).isDefined && c.argumentOption(2).isDefined)
-      .filter(c => c.inAssignment.nonEmpty && !c.argumentOption(1).exists(_.code.contains("string")))
-      .flatMap(_.argumentOption(2))
-      .collect { case c: Call if c.name == Operators.indexAccess => c }
-      .flatMap(_.argumentOption(2))
-      .collect { case lit: Literal if lit.typeFullName == "string" => lit.getString }
-      .toSet
-    castBasedSanitization
+    // A parameter that is cast to an integer somewhere used to be dropped as a source for the whole project, which also
+    // hid its other uses (`$_GET['flag']` is cast in one branch and concatenated into SQL in another). The cast is now
+    // filtered per path (`PathFilter`), so the suppression is opt-in: `-Dzipper.taint.castSanitizer=true`.
+    if (!sys.props.get("zipper.taint.castSanitizer").exists(_.trim.toLowerCase == "true")) Set.empty
+    else {
+      val castBasedSanitization = cpg
+        .call(Operators.cast)
+        .filter(c => c.argumentOption(1).isDefined && c.argumentOption(2).isDefined)
+        .filter(c => c.inAssignment.nonEmpty && !c.argumentOption(1).exists(_.code.contains("string")))
+        .flatMap(_.argumentOption(2))
+        .collect { case c: Call if c.name == Operators.indexAccess => c }
+        .flatMap(_.argumentOption(2))
+        .collect { case lit: Literal if lit.typeFullName == "string" => lit.getString }
+        .toSet
+      castBasedSanitization
+    }
   }
 }
 

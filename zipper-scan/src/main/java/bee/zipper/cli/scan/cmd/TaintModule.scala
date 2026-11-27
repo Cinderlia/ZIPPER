@@ -77,6 +77,9 @@ class TaintModule extends AppModule {
           logger.info("Bridging extract() of database row arrays")
           new bee.zipper.core.cpgcreation.php.passes.ExtractFlowPass(cpg).createAndApply()
         }
+        // Casts only add edges, so they are applied to loaded CPGs as well.
+        logger.info("Bridging type casts")
+        new bee.zipper.core.cpgcreation.php.passes.CastFlowPass(cpg).createAndApply()
         // Same for the template sinks: they only add sink nodes and edges, so a CPG built by an earlier run can gain
         // them without being regenerated.
         if (basicConfig.engineConfig.enableTemplateSinks && basicConfig.projectConfig.isLoadingCpgMode) {
