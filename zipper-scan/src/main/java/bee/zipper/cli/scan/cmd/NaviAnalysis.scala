@@ -64,11 +64,11 @@ object NaviConfig {
       join = Some(true)
     ),
     NaviChainSpec("sqlwrite-direct", List(NaviSegmentSpec("default", "sqlWrite"))),
-    NaviChainSpec("read-to-write", List(NaviSegmentSpec("sqlRead", "sqlWrite"))),
+    NaviChainSpec("read-to-write", List(NaviSegmentSpec("sqlRead", "sqlWriteLoose"))),
     NaviChainSpec("sqlread-direct", List(NaviSegmentSpec("default", "sqlRead"))),
     NaviChainSpec(
       "sqlwrite-second-order",
-      List(NaviSegmentSpec("default", "sqlRead"), NaviSegmentSpec("sqlRead", "sqlWrite")),
+      List(NaviSegmentSpec("default", "sqlRead"), NaviSegmentSpec("sqlRead", "sqlWriteLoose")),
       join = Some(true)
     )
   )
@@ -252,11 +252,59 @@ object NaviAnalysis {
       if (all.isEmpty) sqlSinks(SqlStatementKind.Read) else Map("SqlRead" -> all)
     }
 
+    /** Calls that can execute a statement, whatever their exact name: used by the second-order SQL chains, where the
+      * write is an application level call such as `$db->exec($sql)` or `$link->query($sql)` whose statement is only
+      * visible through a local variable.
+      */
+    val looseWriteNames: Set[String] = Set(
+      "query",
+      "exec",
+      "execute",
+      "execsql",
+      "prepare",
+      "preparestatement",
+      "bindparam",
+      "bindvalue",
+      "mysqli_query",
+      "mysqli_real_query",
+      "mysqli_multi_query",
+      "mysqli_stmt_execute",
+      "mysql_query",
+      "pg_query",
+      "pg_send_query",
+      "sqlite_query",
+      "sqlite_exec",
+      "mssql_query",
+      "sqlsrv_query",
+      "odbc_exec",
+      "db2_exec",
+      "runquery",
+      "sqlquery",
+      "sqlstatement",
+      "multi_query",
+      "real_query"
+    )
+
+    /** Write sinks for the second-order SQL chains: any executor call whose statement classifies as a write, even when
+      * the call name is too generic (or the receiver type is unknown) for the strict SQL sink list.
+      */
+    def looseSqlWriteSinks: Map[String, List[TaintSink]] = {
+      val calls = cpg.call
+        .filter(call => looseWriteNames.contains(call.name.toLowerCase))
+        .filter(call => SqlStatementClassifier.kindOfCall(call).contains(SqlStatementKind.Write))
+        .toList
+      val extra = calls
+        .filterNot(call => SqlStatementClassifier.kindOfCall(call).exists(_ == SqlStatementKind.Read))
+        .map(call => CallArgumentSink(call, call.argument.toList): TaintSink)
+      if (extra.isEmpty) sqlSinks(SqlStatementKind.Write) else Map("SqlWriteLoose" -> extra)
+    }
+
     def resolveSinks(selector: String): Map[String, List[TaintSink]] =
       selector.trim.toLowerCase match {
-        case "sqlread" | "sql-read"   => sqlReadSinks
-        case "sqlwrite" | "sql-write" => sqlSinks(SqlStatementKind.Write)
-        case "sql" | "sqlquery"       => allSinks.filter { case (sinkKind, _) => sinkKind.toLowerCase.contains("sql") }
+        case "sqlread" | "sql-read"                           => sqlReadSinks
+        case "sqlwriteloose" | "sql-write-loose" | "sqlloose" => looseSqlWriteSinks
+        case "sqlwrite" | "sql-write"                         => sqlSinks(SqlStatementKind.Write)
+        case "sql" | "sqlquery" => allSinks.filter { case (sinkKind, _) => sinkKind.toLowerCase.contains("sql") }
         case "fileread" | "file-read" | "file_read" =>
           Map("FileRead" -> fileReadCalls.map(call => CallArgumentSink(call, call.argumentOption(1).toList)))
         case other => allSinks.filter { case (sinkKind, _) => sinkKind.equalsIgnoreCase(other) }
