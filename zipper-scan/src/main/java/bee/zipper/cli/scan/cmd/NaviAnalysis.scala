@@ -48,6 +48,33 @@ case class NaviChainSpec(
 case class NaviConfig(chains: List[NaviChainSpec])
 
 object NaviConfig {
+
+  /** The default navigation chains. They are fixed so that every run reports the same chain names.
+    *
+    * `xss-direct` request value echoed directly (reflected XSS) `xss-second-order` request value stored, read back,
+    * echoed (stored XSS) `sqlwrite-direct` request value written into the database (injection) `read-to-write` database
+    * value written back into the database `sqlread-direct` request value reaching a database read
+    * `sqlwrite-second-order` request value stored, read back, written again
+    */
+  val defaultChains: List[NaviChainSpec] = List(
+    NaviChainSpec("xss-direct", List(NaviSegmentSpec("default", "Xss"))),
+    NaviChainSpec(
+      "xss-second-order",
+      List(NaviSegmentSpec("default", "sqlRead"), NaviSegmentSpec("sqlRead", "Xss")),
+      join = Some(true)
+    ),
+    NaviChainSpec("sqlwrite-direct", List(NaviSegmentSpec("default", "sqlWrite"))),
+    NaviChainSpec("read-to-write", List(NaviSegmentSpec("sqlRead", "sqlWrite"))),
+    NaviChainSpec("sqlread-direct", List(NaviSegmentSpec("default", "sqlRead"))),
+    NaviChainSpec(
+      "sqlwrite-second-order",
+      List(NaviSegmentSpec("default", "sqlRead"), NaviSegmentSpec("sqlRead", "sqlWrite")),
+      join = Some(true)
+    )
+  )
+
+  def default: NaviConfig = NaviConfig(defaultChains)
+
   def load(path: String): NaviConfig = {
     val content = Files.readString(Paths.get(path))
     val json    = parse(content).getOrElse(throw new RuntimeException(s"failed to parse navi config: $path"))
@@ -235,17 +262,21 @@ object NaviAnalysis {
         case other => allSinks.filter { case (sinkKind, _) => sinkKind.equalsIgnoreCase(other) }
       }
 
-    config.chains.foreach { chain =>
-      val chainDir = Paths.get(outputDir, "navi", sanitize(chain.name))
-      FileSys.ensureDirectoryExists(chainDir.toString)
-      val perSegment = chain.segments.zipWithIndex.map { case (segment, index) =>
-        val sources   = resolveSources(segment.source)
-        val sinks     = resolveSinks(segment.sink)
-        val sinkCount = sinks.values.map(_.size).sum
-        val paths =
+    // Segment results are cached by (source, sink, control-flow mode). The default chains share segments
+    // (e.g. `default -> sqlRead` is the first segment of both second-order chains), so every distinct segment is
+    // analyzed once and reused instead of being recomputed per chain.
+    val segmentCache = scala.collection.mutable.Map.empty[(String, String, Boolean), List[TaintPath]]
+
+    def segmentPaths(segment: NaviSegmentSpec, controlFlow: Boolean): List[TaintPath] = {
+      val key = (segment.source.trim.toLowerCase, segment.sink.trim.toLowerCase, controlFlow)
+      segmentCache.getOrElseUpdate(
+        key, {
+          val sources   = resolveSources(segment.source)
+          val sinks     = resolveSinks(segment.sink)
+          val sinkCount = sinks.values.map(_.size).sum
           if (sources.isEmpty || sinkCount == 0) {
             logger.warn(
-              s"navi[${chain.name}] segment ${index + 1}: empty sources or sinks (sources=${sources.size}, sinks=$sinkCount)"
+              s"navi segment ${segment.source} -> ${segment.sink}: empty sources or sinks (sources=${sources.size}, sinks=$sinkCount)"
             )
             List.empty[TaintPath]
           } else
@@ -255,12 +286,24 @@ object NaviAnalysis {
               sinks,
               api,
               c,
-              enableControlStructure =
-                enableNaviControlFlow && c.enableControlStructure && index < chain.segments.size - 1,
-              includeUntaintedSinks = enableNaviControlFlow && index < chain.segments.size - 1
+              enableControlStructure = controlFlow,
+              includeUntaintedSinks = controlFlow
             )
-        val label = segment.name.getOrElse(s"segment-${index + 1}")
-        writeReport(paths, chainDir.resolve(s"${index + 1}-$label").toString, sources)
+        }
+      )
+    }
+
+    config.chains.foreach { chain =>
+      val chainDir = Paths.get(outputDir, "navi", sanitize(chain.name))
+      FileSys.ensureDirectoryExists(chainDir.toString)
+      val perSegment = chain.segments.zipWithIndex.map { case (segment, index) =>
+        val controlFlow = enableNaviControlFlow && c.enableControlStructure && index < chain.segments.size - 1
+        val sources     = resolveSources(segment.source)
+        val paths       = segmentPaths(segment, controlFlow)
+        if (c.enableNaviDebugDump) {
+          val label = segment.name.getOrElse(s"segment-${index + 1}")
+          writeReport(paths, chainDir.resolve(s"${index + 1}-$label").toString, sources)
+        }
         logger.info(s"navi[${chain.name}] ${segment.source} -> ${segment.sink}: ${paths.size} paths")
         (paths, sources)
       }
@@ -299,7 +342,10 @@ object NaviAnalysis {
         logger.info(
           s"navi[${chain.name}] joined: ${joinedAll.size} paths (${joined.size} linked, ${extra.size} from empty intermediate sinks)"
         )
-        writeReport(joinedAll, chainDir.resolve("joined").toString, joinedSources)
+        writeGraphs(joinedAll, chainDir.toString, joinedSources)
+        if (c.enableNaviDebugDump) writeReport(joinedAll, chainDir.resolve("joined").toString, joinedSources)
+      } else {
+        writeGraphs(perSegment.head._1, chainDir.toString, perSegment.head._2)
       }
     }
   }
@@ -433,6 +479,15 @@ object NaviAnalysis {
 
   private def nodeKey(node: CfgNode): (String, Int, String) =
     (node.file.headOption.map(_.name).getOrElse(""), node.lineNumber.getOrElse(-1), node.code)
+
+  /** Writes the agent facing report: a single graph file per chain, directly in the chain directory. */
+  private def writeGraphs(paths: List[TaintPath], dir: String, sources: List[CfgNode]): Unit = {
+    FileSys.ensureDirectoryExists(dir)
+    val graphs       = SinkGraphBuilder.build(paths, sources.toSet)
+    val graphsStream = new PrintStream(new FileOutputStream(Paths.get(dir, "taint-analysis-graphs.json").toFile))
+    try graphsStream.println(TaintResult.renderGraphs(graphs))
+    finally graphsStream.close()
+  }
 
   private def writeReport(paths: List[TaintPath], dir: String, sources: List[CfgNode]): Unit = {
     FileSys.ensureDirectoryExists(dir)

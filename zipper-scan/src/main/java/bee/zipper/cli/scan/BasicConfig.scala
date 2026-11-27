@@ -272,6 +272,15 @@ class EngineConfig {
   var customNaviConfig: String = ""
 
   @CommandLine.Option(
+    names = Array("--enable-navi-debug-dump"),
+    description = Array(
+      "Also write per-segment reports, the joined report and the result/slices/flows files for navigation chains " +
+        "(debugging only: the default output is a single graph report per chain)"
+    )
+  )
+  var enableNaviDebugDump: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--custom-sanitizer"),
     split = ",",
     description = Array("Custom sanitizer configuration file paths (comma-separated)")

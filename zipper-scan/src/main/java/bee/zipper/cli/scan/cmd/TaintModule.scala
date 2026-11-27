@@ -190,8 +190,13 @@ class TaintModule extends AppModule {
             }
           }
         } else if (customNaviPath != null && customNaviPath.nonEmpty) {
-          logger.info(s"Running navigation analysis from: $customNaviPath")
-          NaviAnalysis.run(NaviConfig.load(customNaviPath), cpg, api, basicConfig.engineConfig, outputDir)
+          // `--custom-navi default` runs the built-in chain set (fixed names: xss-direct, xss-second-order,
+          // sqlwrite-direct, read-to-write, sqlread-direct, sqlwrite-second-order).
+          val naviConfig =
+            if (customNaviPath.trim.equalsIgnoreCase("default")) NaviConfig.default
+            else NaviConfig.load(customNaviPath)
+          logger.info(s"Running navigation analysis: ${naviConfig.chains.map(_.name).mkString(", ")}")
+          NaviAnalysis.run(naviConfig, cpg, api, basicConfig.engineConfig, outputDir)
         } else {
           val taintAnalysisResult =
             executeStaticTaintAnalysis(basicConfig.engineConfig, cpg, api, reachabilityReport)
