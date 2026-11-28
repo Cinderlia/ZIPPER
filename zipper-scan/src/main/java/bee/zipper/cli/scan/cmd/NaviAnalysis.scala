@@ -297,10 +297,27 @@ object NaviAnalysis {
       */
     def nameBasedSqlWriteSinks: Map[String, List[TaintSink]] = {
       val calls = cpg.call
-        .filter(call => sqlExecutorNames.contains(call.name.toLowerCase))
-        .filter(call => SqlStatementClassifier.kindOfCall(call).contains(SqlStatementKind.Write))
+        .filter(call =>
+          sqlExecutorNames.contains(call.name.toLowerCase) ||
+            isRowWriteHelper(call)
+        )
+        .filter(call =>
+          isRowWriteHelper(call) ||
+            SqlStatementClassifier.kindOfCall(call).contains(SqlStatementKind.Write)
+        )
         .toList
       Map("SqlWrite" -> calls.map(call => CallArgumentSink(call, call.argument.toList): TaintSink))
+    }
+
+    /** Row-level write helpers of application database layers (`$wpdb->insert/update/delete/replace`) carry the SQL
+      * statement in a generated form and therefore never expose SQL text to `SqlStatementClassifier`; recognise them by
+      * receiver and method name instead.
+      */
+    def isRowWriteHelper(call: Call): Boolean = {
+      val name          = call.name.toLowerCase
+      val rowHelpers    = Set("insert", "update", "delete", "replace", "insertmulti", "updatemulti")
+      lazy val receiver = call.receiver.headOption.map(_.code.trim).getOrElse("")
+      rowHelpers.contains(name) && (receiver == "$wpdb" || receiver.endsWith("->db") || receiver == "$db")
     }
 
     /** Write sinks for the second-order SQL chains: same resolution as `sqlWrite`, kept as a separate selector name so

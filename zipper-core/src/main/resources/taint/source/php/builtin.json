@@ -181,6 +181,11 @@
         { "name": "runQuerySingleResult" }
       ],
       "methods": [
+      { "typeName": null, "receiverName": "$wpdb", "methodName": "query" },
+      { "typeName": null, "receiverName": "$wpdb", "methodName": "get_results" },
+      { "typeName": null, "receiverName": "$wpdb", "methodName": "get_row" },
+      { "typeName": null, "receiverName": "$wpdb", "methodName": "get_var" },
+      { "typeName": null, "receiverName": "$wpdb", "methodName": "get_col" },
         { "typeName": null, "receiverName": null, "methodName": "getAll" },
         { "typeName": null, "receiverName": null, "methodName": "getRow" },
         { "typeName": null, "receiverName": null, "methodName": "getOne" },
