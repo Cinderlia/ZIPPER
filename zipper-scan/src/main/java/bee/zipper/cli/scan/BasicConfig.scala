@@ -299,6 +299,25 @@ class EngineConfig {
   var enableTableJoin: Boolean = false
 
   @CommandLine.Option(
+    names = Array("--enable-array-builders"),
+    description = Array(
+      "Bridge array builders such as compact() so the values of the named variables reach the array they build. " +
+        "Enabled by default in WordPress mode."
+    )
+  )
+  var enableArrayBuilders: Boolean = false
+
+  @CommandLine.Option(
+    names = Array("--enable-dynamic-dispatch"),
+    description = Array(
+      "Bridge PHP runtime dispatch (`call_user_func('prefix_' . $type, ...)`) to the methods whose name carries the " +
+        "literal prefix, so the arguments reach the parameters of the dispatched body. Enabled by default in " +
+        "WordPress mode"
+    )
+  )
+  var enableDynamicDispatch: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--custom-sanitizer"),
     split = ",",
     description = Array("Custom sanitizer configuration file paths (comma-separated)")

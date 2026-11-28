@@ -152,6 +152,16 @@ object CpgGeneration {
       new ExtractFlowPass(cpg).createAndApply()
     }
 
+    if (c.enableDynamicDispatch) {
+      logger.info("Bridging dynamic function dispatch")
+      new DynamicDispatchPass(cpg).createAndApply()
+    }
+
+    if (c.enableArrayBuilders) {
+      logger.info("Bridging array builders")
+      new CompactFlowPass(cpg).createAndApply()
+    }
+
     // A cast keeps the value it carries. Without this edge a request value written as `(int) $_GET['id']` loses its
     // dependencies and the write it feeds is reported as unreachable from any source.
     logger.info("Bridging type casts")

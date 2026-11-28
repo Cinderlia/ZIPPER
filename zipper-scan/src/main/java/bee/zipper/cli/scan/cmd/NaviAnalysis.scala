@@ -447,7 +447,8 @@ object NaviAnalysis {
           .map { path =>
             // A table level join connects two paths across requests: the written row and the read row never share a
             // control-flow or dataflow edge, so connectivity is only checked for node level joins.
-            if (bridge.contains("table")) path else PathFeasibility.keepConnected(path)
+            if (bridge.contains("table")) path
+            else PathFeasibility.keepConnected(path)
           }
           .flatMap(BranchTrimming.trim)
         val joinedSources = perSegment
@@ -681,8 +682,14 @@ object NaviAnalysis {
   /** Columns of the written row must be read back: a read of `*` carries every column, and when either side cannot be
     * parsed the table filter alone keeps the pair (the narrowing is the content-table restriction).
     */
-  private def tableJoinCompatible(writeNode: CfgNode, readNode: CfgNode, shared: Set[String]): Boolean = {
-    if (!shared.exists(contentTables.contains)) false
+  private def tableJoinCompatible(
+    writeNode: CfgNode,
+    readNode: CfgNode,
+    shared: Set[String],
+    requireContentTable: Boolean = true
+  ): Boolean = {
+    if (requireContentTable && !shared.exists(contentTables.contains)) false
+    else if (shared.isEmpty) false
     else {
       val written = sqlColumns(writeNode, writeSide = true)
       val read    = sqlColumns(readNode, writeSide = false)
@@ -698,16 +705,42 @@ object NaviAnalysis {
   /** Table level join: the row a request writes into table T is read back from the same table. This is the only way a
     * stored value and its rendering can meet when write and read happen in different requests and files.
     */
-  private def joinPathsByTable(left: List[TaintPath], right: List[TaintPath]): List[TaintPath] = {
-    val writes = left.map(path => (path, sqlTables(path.sink))).filter(_._2.nonEmpty)
-    if (writes.isEmpty || right.isEmpty) Nil
+  /** Helpers that write a row from a column map instead of running SQL text. */
+  private val rowWriteHelpers = Set("insert", "update", "delete", "replace", "insertmulti", "updatemulti")
+
+  private def isRowWriteReceiver(receiver: String): Boolean =
+    receiver == "$wpdb" || receiver == "$db" || receiver.endsWith("->db")
+
+  /** Whether a path ends in a statement that writes rows. */
+  private def isWriteCall(node: CfgNode): Boolean =
+    node match {
+      case call: Call =>
+        SqlStatementClassifier.kindOfCall(call).contains(SqlStatementKind.Write) ||
+        (rowWriteHelpers.contains(call.name.toLowerCase) &&
+          call.receiver.headOption.map(_.code.trim).exists(isRowWriteReceiver))
+      case _ => false
+    }
+
+  private def joinPathsByTable(
+    left: List[TaintPath],
+    right: List[TaintPath],
+    requireContentTable: Boolean = true
+  ): List[TaintPath] = {
+    val prefixes = left.map(path => (path, sqlTables(path.sink))).filter(_._2.nonEmpty)
+    if (prefixes.isEmpty || right.isEmpty) Nil
     else {
       val joined = for {
-        (prefix, writeTables) <- writes
-        suffix                <- right
-        readTables = sqlTables(suffix.sink)
-        shared     = writeTables.intersect(readTables)
-        if shared.nonEmpty && tableJoinCompatible(prefix.sink, suffix.sink, shared)
+        (prefix, prefixTables) <- prefixes
+        suffix                 <- right
+        suffixTables = sqlTables(suffix.sink)
+        // Either side may be the one that writes: a read-to-write chain lists reads first, a write-to-read chain writes.
+        prefixIsWrite = isWriteCall(prefix.sink)
+        writeTables   = if (prefixIsWrite) prefixTables else suffixTables
+        readTables    = if (prefixIsWrite) suffixTables else prefixTables
+        writeNode     = if (prefixIsWrite) prefix.sink else suffix.sink
+        readNode      = if (prefixIsWrite) suffix.sink else prefix.sink
+        shared        = writeTables.intersect(readTables)
+        if shared.nonEmpty && tableJoinCompatible(writeNode, readNode, shared, requireContentTable)
       } yield TaintPath(
         suffix.kind,
         order = true,

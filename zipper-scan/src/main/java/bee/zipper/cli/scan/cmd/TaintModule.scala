@@ -77,6 +77,21 @@ class TaintModule extends AppModule {
           logger.info("Bridging extract() of database row arrays")
           new bee.zipper.core.cpgcreation.php.passes.ExtractFlowPass(cpg).createAndApply()
         }
+        // Dynamic dispatch only adds call and data edges, so a CPG built by an earlier run can gain them.
+        if (
+          (basicConfig.engineConfig.enableDynamicDispatch || basicConfig.engineConfig.enableWordPress) &&
+          basicConfig.projectConfig.isLoadingCpgMode
+        ) {
+          logger.info("Bridging dynamic function dispatch")
+          new bee.zipper.core.cpgcreation.php.passes.DynamicDispatchPass(cpg).createAndApply()
+        }
+        if (
+          (basicConfig.engineConfig.enableArrayBuilders || basicConfig.engineConfig.enableWordPress) &&
+          basicConfig.projectConfig.isLoadingCpgMode
+        ) {
+          logger.info("Bridging array builders")
+          new bee.zipper.core.cpgcreation.php.passes.CompactFlowPass(cpg).createAndApply()
+        }
         // Casts only add edges, so they are applied to loaded CPGs as well.
         logger.info("Bridging type casts")
         new bee.zipper.core.cpgcreation.php.passes.CastFlowPass(cpg).createAndApply()

@@ -20,6 +20,9 @@ class MemoryUtils(cpg: Cpg, vsa: ValueSetResult)(implicit ctx: AnalysisContext)
     extends XUtils[MemPtr](cpg, new ResultHolder) {
   import ctx.translator.translate
 
+  /** Pointer index standing for "any entry of this array", used when the index is computed at run time. */
+  private val WildcardIndex = "*"
+
   private def getMemPtrs(call: Call): Set[MemPtr] = {
     def extractArguments(call: Call): Option[(Expression, Expression)] =
       for {
@@ -52,7 +55,9 @@ class MemoryUtils(cpg: Cpg, vsa: ValueSetResult)(implicit ctx: AnalysisContext)
               case StringLiteral(value) => value
               case IntLiteral(value)    => value.toString
             }
-            createPtrs(arrays, indexes, ArrayIndexPtr.apply)
+            // A computed index (`$a[$key]`) is not a literal, so the access may hit any entry: keep the whole array as
+            // one pointer so a write through a computed index still defines the entries a read looks for.
+            createPtrs(arrays, indexes, ArrayIndexPtr.apply) ++ arrays.map(ArrayIndexPtr(_, WildcardIndex))
           case _ => Iterator.empty
         }
       case _ => Iterator.empty
