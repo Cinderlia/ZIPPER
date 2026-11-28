@@ -167,6 +167,13 @@ object CpgGeneration {
     logger.info("Bridging type casts")
     new CastFlowPass(cpg).createAndApply()
 
+    // A payload array collects the request values it is given; a database call that receives the whole array therefore
+    // carries them too.
+    if (c.enableWordPress || c.enableArrayBuilders) {
+      logger.info("Bridging array element writes")
+      new ArrayWriteFlowPass(cpg).createAndApply()
+    }
+
     // Twig templates are not part of the CPG, so a value printed through `|raw` has no sink. The pass only adds sink
     // nodes and a few data dependency edges, and is inert for projects that ship no Twig templates.
     if (c.enableTwigSinks) {
