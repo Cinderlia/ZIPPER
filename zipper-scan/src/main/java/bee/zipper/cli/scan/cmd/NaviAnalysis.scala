@@ -73,7 +73,24 @@ object NaviConfig {
     )
   )
 
+  /** Chains added when WordPress support is enabled: WordPress hands database rows to object properties and renders
+    * those properties later, so a read and its output are connected through `wpObject` rather than through the SQL read
+    * call itself.
+    */
+  val wordPressChains: List[NaviChainSpec] = List(
+    NaviChainSpec(
+      "wp-object",
+      List(NaviSegmentSpec("default", "sqlRead", Some("read")), NaviSegmentSpec("wpObject", "Xss", Some("render"))),
+      join = Some(true),
+      bridge = Some("wpRowToObject")
+    )
+  )
+
   def default: NaviConfig = NaviConfig(defaultChains)
+
+  /** Built-in chain set; with WordPress support enabled the `wp-object` chain is appended automatically. */
+  def default(wordpress: Boolean): NaviConfig =
+    NaviConfig(if (wordpress) defaultChains ++ wordPressChains else defaultChains)
 
   def load(path: String): NaviConfig = {
     val content = Files.readString(Paths.get(path))

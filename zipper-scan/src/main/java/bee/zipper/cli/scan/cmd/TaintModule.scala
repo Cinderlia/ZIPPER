@@ -196,7 +196,8 @@ class TaintModule extends AppModule {
           // `--custom-navi default` runs the built-in chain set (fixed names: xss-direct, xss-second-order,
           // sqlwrite-direct, read-to-write, sqlread-direct, sqlwrite-second-order).
           val naviConfig =
-            if (customNaviPath.trim.equalsIgnoreCase("default")) NaviConfig.default
+            if (customNaviPath.trim.equalsIgnoreCase("default"))
+              NaviConfig.default(basicConfig.engineConfig.enableWordPress)
             else NaviConfig.load(customNaviPath)
           logger.info(s"Running navigation analysis: ${naviConfig.chains.map(_.name).mkString(", ")}")
           NaviAnalysis.run(naviConfig, cpg, api, basicConfig.engineConfig, outputDir)
