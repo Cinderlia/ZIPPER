@@ -273,3 +273,11 @@ docker exec -d php84-dev bash -lc 'cd /home/so/ZIPPER-SourceCode && \
 ```
 
 `-o`（离线）必须带；构建过程会跑 scalafmt，所以别手改格式后直接断言编译通过，改完用 `grep` 复核。
+
+### 3.9 `--enable-table-join`（WordPress 模式默认开）
+
+把「写库」与「读库」按**表**接起来，再借 WP 对象桥接到输出点，用来覆盖一次请求写、另一次请求读的二次链（评论提交 → 审核 → 页面渲染）。
+
+- 只在 `--enable-wordpress` 或显式给该开关时生效；新增链 `wp-table-xss`（`default→sqlWrite` + `default→sqlRead` + `wpObject→Xss`）。
+- 收敛条件：两侧表名可解析、交集命中内容表、读侧列可解析（`SELECT *` 放行）、列交集非空、渲染与读库同文件。
+- 实测 WordPress：809 条写读候选 → 324 条读后渲染 → 237 条路径 / 6 个 sink（`comment-template.php:1090/140/407/82`、`post-template.php:206`、`post-thumbnail-template.php:328`）。

@@ -83,12 +83,25 @@ object NaviConfig {
       List(NaviSegmentSpec("default", "sqlRead", Some("read")), NaviSegmentSpec("wpObject", "Xss", Some("render"))),
       join = Some(true),
       bridge = Some("wpRowToObject")
+    ),
+    NaviChainSpec(
+      "wp-table-xss",
+      List(
+        NaviSegmentSpec("default", "sqlWrite", Some("write")),
+        NaviSegmentSpec("default", "sqlRead", Some("read")),
+        NaviSegmentSpec("wpObject", "Xss", Some("render"))
+      ),
+      join = Some(true),
+      bridge = Some("table+wp")
     )
   )
 
   def default: NaviConfig = NaviConfig(defaultChains)
 
-  /** Built-in chain set; with WordPress support enabled the `wp-object` chain is appended automatically. */
+  /** Built-in chain set. With WordPress support enabled two WordPress chains are appended: `wp-object` (a database row
+    * rendered through an object property) and `wp-table-xss` (a row written into a content table, read back from the
+    * same table and rendered). The table chain needs a table level join, which WordPress mode enables by default.
+    */
   def default(wordpress: Boolean): NaviConfig =
     NaviConfig(if (wordpress) defaultChains ++ wordPressChains else defaultChains)
 
@@ -188,6 +201,9 @@ object NaviAnalysis {
     outputDir: String,
     enableNaviControlFlow: Boolean = true
   ): Unit = {
+    // Table level joins are only meaningful for WordPress style storage; they are enabled by the engine flag and, for
+    // WordPress runs, by default (the `wp-table-xss` chain asks for one through its bridge name as well).
+    val enableTableJoin = c.enableTableJoin || c.enableWordPress
     val sourceSearcher = TaintSourceSearcher.create(
       cpg,
       api.vfg,
@@ -400,8 +416,14 @@ object NaviAnalysis {
         (paths, sources)
       }
       if (chain.join.contains(true) && perSegment.size > 1) {
-        val bridgeWp = chain.bridge.exists(value => value.toLowerCase.contains("wp"))
-        val joined   = perSegment.map(_._1).reduceLeft((left, right) => joinPaths(left, right, bridgeWp))
+        val bridge    = chain.bridge.map(_.toLowerCase).getOrElse("")
+        val bridgeWp  = bridge.contains("wp")
+        val bridgeTbl = bridge.contains("table") || enableTableJoin
+        val joined =
+          if (bridgeTbl && bridge.contains("table") && perSegment.size > 2)
+            joinTableToWp(perSegment.head._1, perSegment(1)._1, perSegment(2)._1)
+          else perSegment.map(_._1).reduceLeft((left, right) => joinPaths(left, right, bridgeWp))
+        if (debug) logger.info(s"[navi-debug] ${chain.name}: join candidates=${joined.size} (bridge=$bridge)")
         // If an intermediate sink B is not reached by the previous segment (it is an empty sink there), a B -> C
         // chain from the next segment still belongs to the navigation and is added on its own. Empty sinks C (paths
         // that consist of the sink only) are never added.
@@ -422,7 +444,11 @@ object NaviAnalysis {
           .values
           .map(_.head)
           .toList
-          .map(PathFeasibility.keepConnected)
+          .map { path =>
+            // A table level join connects two paths across requests: the written row and the read row never share a
+            // control-flow or dataflow edge, so connectivity is only checked for node level joins.
+            if (bridge.contains("table")) path else PathFeasibility.keepConnected(path)
+          }
           .flatMap(BranchTrimming.trim)
         val joinedSources = perSegment
           .flatMap(_._2)
@@ -516,28 +542,7 @@ object NaviAnalysis {
     // WordPress bridge: a database row is copied into an object field dynamically (`$this->$key = $value`), so the
     // field-sensitive dataflow cannot connect the getter result with the field read. Join a path ending at a
     // database read of class family F with a path starting at a WP object field read of the same family.
-    val bridged =
-      if (!bridgeWp) Nil
-      else {
-        right.flatMap { suffix =>
-          suffix.path.head match {
-            case call: Call =>
-              bridgeAnchor(call) match {
-                case Some(Left((file, line))) =>
-                  val candidates = left.filter(prefix =>
-                    prefix.path.last.file.headOption.getOrElse("") == file &&
-                      prefix.path.last.lineNumber.getOrElse(-1) == line
-                  )
-                  attachAll(candidates, suffix)
-                case Some(Right(cls)) =>
-                  val candidates = left.filter(prefix => enclosingClass(prefix.path.last).exists(_.contains(cls)))
-                  attachAll(candidates, suffix)
-                case None => Nil
-              }
-            case _ => Nil
-          }
-        }
-      }
+    val bridged = if (!bridgeWp) Nil else bridgeWpPaths(left, right)
 
     if (bridgeWp && bridged.nonEmpty) logger.info(s"navi bridge: ${bridged.size} WordPress object-field bridges")
     (joined ++ bridged)
@@ -545,6 +550,180 @@ object NaviAnalysis {
       .values
       .map(_.head)
       .toList
+  }
+
+  /** WordPress tables whose rows are rendered back to the page; a table join is only reported for these. */
+  private val contentTables = Set("posts", "postmeta", "comments", "commentmeta", "terms", "term_taxonomy")
+
+  /** Bridges read paths to WP object-field read paths: the database row of class family F is copied into the object
+    * that the suffix starts from. The end of a left path is its sink, not its last node (control flow enhancement may
+    * append nodes after the sink).
+    */
+  private def bridgeWpPaths(left: List[TaintPath], right: List[TaintPath]): List[TaintPath] =
+    right.flatMap { suffix =>
+      suffix.path.head match {
+        case call: Call =>
+          bridgeAnchor(call) match {
+            case Some(Left((file, line))) =>
+              attachAll(left.filter(anchorMatches(file, line, _)), suffix)
+            case Some(Right(cls)) =>
+              attachAll(left.filter(prefix => enclosingClass(prefix.sink).exists(_.contains(cls))), suffix)
+            case None => Nil
+          }
+        case _ => Nil
+      }
+    }
+
+  private def anchorMatches(file: String, line: Int, path: TaintPath): Boolean = {
+    val end = path.sink
+    end.file.name.headOption.getOrElse("") == file && end.lineNumber.getOrElse(-1) == line
+  }
+
+  /** The row a page renders was usually read in the same file that renders it; requiring this keeps the table level
+    * join from pairing every read of a table with every rendering of that family.
+    */
+  private def sameFile(render: TaintPath, base: TaintPath): Boolean = {
+    val renderFile = render.path.head match {
+      case call: Call => call.file.name.headOption
+      case _          => None
+    }
+    renderFile.isDefined && renderFile == base.sink.file.name.headOption
+  }
+
+  private def anchorOf(call: Call): Option[Either[(String, Int), String]] = bridgeAnchor(call)
+
+  /** Object family of a WordPress getter -> the tables a row of that family is read from. */
+  private val wpClassTables: Map[String, Set[String]] = Map(
+    "wp_post"              -> Set("posts", "postmeta"),
+    "wp_comment"           -> Set("comments", "commentmeta"),
+    "wp_user"              -> Set("users", "usermeta"),
+    "wp_term"              -> Set("terms", "termmeta"),
+    "wp_term_taxonomy"     -> Set("term_taxonomy", "term_relationships"),
+    "wp_term_relationship" -> Set("term_relationships")
+  )
+
+  private def tablesOfClass(cls: String): Set[String] = {
+    val base = cls.trim.stripPrefix("wp_")
+    wpClassTables.getOrElse(cls.trim, Set(if (base.endsWith("s")) base else base + "s"))
+  }
+
+  /** Joins a written row, the read of the same content table and the rendering of that row through an object property.
+    * The three stages happen in different requests, so the join is table level: a row written into `comments` is read
+    * back from `comments` and rendered through a `wp_comment` field.
+    */
+  private def joinTableToWp(
+    writes: List[TaintPath],
+    reads: List[TaintPath],
+    renders: List[TaintPath]
+  ): List[TaintPath] = {
+    val tableJoined = joinPathsByTable(writes, reads)
+    logger.info(
+      s"navi table join: writes=${writes.size}, reads=${reads.size}, written rows read back=${tableJoined.size}"
+    )
+    val joined = for {
+      render <- renders
+      call   <- render.path.head match { case call: Call => List(call); case _ => Nil }
+      anchor <- anchorOf(call).toList
+      base   <- tableJoined
+      if anchor match {
+        case Left((file, line)) => anchorMatches(file, line, base)
+        case Right(cls) =>
+          sqlTables(base.sink).exists(tablesOfClass(cls).contains) && sameFile(render, base)
+      }
+    } yield TaintPath(
+      render.kind,
+      order = true,
+      base.path ++ render.path,
+      Some(render.sink),
+      middleNode = Some(base.sink),
+      dataflowNodes = base.dataflowNodes ++ render.dataflowNodes,
+      optionalGuards = (base.optionalGuards ++ render.optionalGuards).distinct
+    )
+    logger.info(s"navi table join: ${joined.size} written-row renderings")
+    joined
+      .groupBy(path => (path.path.head.id(), path.path.last.id(), path.path.size))
+      .values
+      .map(_.head)
+      .toList
+  }
+  private val wpdbTablePattern =
+    "(?i)\\$wpdb->(posts|postmeta|comments|commentmeta|users|usermeta|terms|term_taxonomy|term_relationships|options|links|termmeta|blogs|blogmeta)".r
+  private val wpdbPrefixPattern = "(?i)\\$wpdb->prefix\\}?([a-z0-9_]+)".r
+
+  private def nodeText(node: CfgNode): String = node match {
+    case call: Call => (call.code :: call.argument.map(_.code).toList).mkString(" ")
+    case other      => other.code
+  }
+
+  private def sqlTables(node: CfgNode): Set[String] = {
+    val text     = nodeText(node)
+    val named    = wpdbTablePattern.findAllMatchIn(text).map(_.group(1).toLowerCase).toSet
+    val prefixed = wpdbPrefixPattern.findAllMatchIn(text).map(_.group(1).toLowerCase).toSet
+    named ++ prefixed
+  }
+
+  private def sqlColumns(node: CfgNode, writeSide: Boolean): Set[String] = {
+    val text   = nodeText(node)
+    val select = "(?is)SELECT\\s+(.*?)\\s+FROM\\s".r.findAllMatchIn(text).flatMap(m => m.group(1).split(","))
+    val insert = "(?is)INSERT\\s+(?:IGNORE\\s+)?INTO\\s+[^\\s(]+\\s*\\(([^)]*)\\)".r
+      .findAllMatchIn(text)
+      .flatMap(m => m.group(1).split(","))
+    val update = "(?is)SET\\s+(.*?)(?:WHERE|$)".r
+      .findAllMatchIn(text)
+      .flatMap(m => m.group(1).split(",").flatMap(_.split("=").headOption))
+    val columns = if (writeSide) insert ++ update else select
+    columns
+      .map(_.replace("`", "").trim.toLowerCase)
+      .filter(column => column == "*" || column.matches("[a-z0-9_]+"))
+      .toSet
+  }
+
+  /** Columns of the written row must be read back: a read of `*` carries every column, and when either side cannot be
+    * parsed the table filter alone keeps the pair (the narrowing is the content-table restriction).
+    */
+  private def tableJoinCompatible(writeNode: CfgNode, readNode: CfgNode, shared: Set[String]): Boolean = {
+    if (!shared.exists(contentTables.contains)) false
+    else {
+      val written = sqlColumns(writeNode, writeSide = true)
+      val read    = sqlColumns(readNode, writeSide = false)
+      // A rendering reads a column: when the read cannot be parsed there is no evidence that the written row is the one
+      // that is displayed, so the pair is dropped.
+      if (read.isEmpty) false
+      else if (read.contains("*")) true
+      else if (written.nonEmpty) written.intersect(read).nonEmpty
+      else true
+    }
+  }
+
+  /** Table level join: the row a request writes into table T is read back from the same table. This is the only way a
+    * stored value and its rendering can meet when write and read happen in different requests and files.
+    */
+  private def joinPathsByTable(left: List[TaintPath], right: List[TaintPath]): List[TaintPath] = {
+    val writes = left.map(path => (path, sqlTables(path.sink))).filter(_._2.nonEmpty)
+    if (writes.isEmpty || right.isEmpty) Nil
+    else {
+      val joined = for {
+        (prefix, writeTables) <- writes
+        suffix                <- right
+        readTables = sqlTables(suffix.sink)
+        shared     = writeTables.intersect(readTables)
+        if shared.nonEmpty && tableJoinCompatible(prefix.sink, suffix.sink, shared)
+      } yield TaintPath(
+        suffix.kind,
+        order = true,
+        prefix.path ++ suffix.path,
+        Some(suffix.sink),
+        middleNode = Some(prefix.path.last),
+        dataflowNodes = prefix.dataflowNodes ++ suffix.dataflowNodes,
+        optionalGuards = (prefix.optionalGuards ++ suffix.optionalGuards).distinct
+      )
+      if (joined.nonEmpty) logger.info(s"navi table join: ${joined.size} write-to-read bridges")
+      joined
+        .groupBy(path => (path.path.head.id(), path.path.last.id(), path.path.size))
+        .values
+        .map(_.head)
+        .toList
+    }
   }
 
   /** Keep all legal sources: one path per distinct source, the shortest one, for the anchored database access. */

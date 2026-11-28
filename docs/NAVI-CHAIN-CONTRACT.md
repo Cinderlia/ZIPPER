@@ -243,3 +243,26 @@ navi[xss-second-order] joined: 104 paths (6 linked, 101 from empty intermediate 
 - **二次 SQL 覆盖有限**：只有语句能通过局部定义解析为写、且调用名在 26 个执行器内才会被放宽口径识别；`$stmt->bindParam()` 之后 `execute()` 的参数化写法不会报（本来就是安全的）。
 - **JS/Twig 深处数据流不做**：`--enable-template-sinks` 只把模板/脚本的输出点建 sink 并按键名桥接，模板内部复杂运算不追。
 - **ORM 读库（Propel/Eloquent 等）不是 sqlRead 源**：`findPk()`/`getUserName()` 这类链路会整段缺失（见 `UNRESOLVED-ISSUES.md` §13）。
+
+## 11. WordPress 表级 join（`wp-table-xss`）
+
+WordPress 的读写发生在不同请求、不同文件，中间隔着数据库，节点级拼接天然不通，因此 `--enable-wordpress` 时额外追加一条三段链：
+
+| 段 | source | sink | name |
+|---|---|---|---|
+| 1 | `default` | `sqlWrite` | `write` |
+| 2 | `default` | `sqlRead` | `read` |
+| 3 | `wpObject` | `Xss` | `render` |
+
+`bridge = "table+wp"`：先按 **表** 把写路径与读路径接起来（`joinPathsByTable`），再按 WP 对象桥把读路径接到渲染路径（`bridgeWpPaths`）。
+
+表级拼接的收敛条件（缺一不可）：
+
+1. 写、读两侧都能从 SQL 文本里解析出表名（`$wpdb->posts`、`$wpdb->prefix}posts` 等写法都认）；
+2. 交集必须命中内容表 `posts / postmeta / comments / commentmeta / terms / term_taxonomy`；
+3. 读侧必须能解析出列；解析不出就拒绝（`SELECT *` 视为可覆盖任意列）；两侧都给出列时要求列交集非空；
+4. 渲染调用与读库调用必须在**同一文件**（`sameFile`）。渲染锚点是 `Right(class)` 时，用 `wpClassTables` 把 WP 实体类映射回表（`wp_comment` → comments/commentmeta 等）。
+
+实测（WordPress 6.x，`--enable-wordpress`）：`default→sqlWrite` 186、`default→sqlRead` 228、`wpObject→Xss` 255，表级接出 809 条候选、324 条读后渲染，最终 **237 条路径、6 个 sink**。收敛靠的是第 3、4 条：去掉第 4 条会膨胀到 134151 条渲染、12927 条路径。
+
+开关：`--enable-table-join`（默认关，WordPress 模式下自动开启；单独打开时仅对 `bridge` 含 `table` 的链生效）。

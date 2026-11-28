@@ -290,6 +290,15 @@ class EngineConfig {
   var enableNaviDebugDump: Boolean = false
 
   @CommandLine.Option(
+    names = Array("--enable-table-join"),
+    description = Array(
+      "Join navigation segments at table level: a row a request writes into a content table is read back from the " +
+        "same table and rendered (WordPress style storage). Enabled by default in WordPress mode"
+    )
+  )
+  var enableTableJoin: Boolean = false
+
+  @CommandLine.Option(
     names = Array("--custom-sanitizer"),
     split = ",",
     description = Array("Custom sanitizer configuration file paths (comma-separated)")
