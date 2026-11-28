@@ -401,7 +401,21 @@ object NaviAnalysis {
         val joined =
           if (bridgeTbl && bridge.contains("table") && perSegment.size > 2)
             joinTableToWp(perSegment.head._1, perSegment(1)._1, perSegment(2)._1)
-          else perSegment.map(_._1).reduceLeft((left, right) => joinPaths(left, right, bridgeWp))
+          else if (
+            enableTableJoin && perSegment.size == 2 &&
+            (chain.name == "xss-second-order" || chain.name == "sqlwrite-second-order")
+          ) {
+            // A row written by one request is read by another one, so the two segments share no node. Pair the writes
+            // with the rows the second segment reads by table, and (for the output chain) keep the renderings.
+            val nodeLevel  = joinPaths(perSegment.head._1, perSegment(1)._1, bridgeWp)
+            val writePaths = segmentPaths(NaviSegmentSpec("default", "sqlWrite"), controlFlow = true)
+            if (chain.name == "xss-second-order") {
+              val renders = segmentPaths(NaviSegmentSpec("wpObject", "Xss"), controlFlow = false)
+              nodeLevel ++ joinTableToWp(writePaths, perSegment.head._1, renders)
+            } else {
+              nodeLevel ++ joinPathsByTable(perSegment.head._1, writePaths, requireContentTable = true)
+            }
+          } else perSegment.map(_._1).reduceLeft((left, right) => joinPaths(left, right, bridgeWp))
         if (debug) logger.info(s"[navi-debug] ${chain.name}: join candidates=${joined.size} (bridge=$bridge)")
         // If an intermediate sink B is not reached by the previous segment (it is an empty sink there), a B -> C
         // chain from the next segment still belongs to the navigation and is added on its own. Empty sinks C (paths
