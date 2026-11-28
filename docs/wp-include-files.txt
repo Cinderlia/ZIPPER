@@ -1,0 +1,74 @@
+# WordPress 7.1.5 · 「评论 / 文章 → 入库 → 后台审核 → 出库 → 渲染」链路文件清单
+#
+# 用法：
+#   java -Xmx20g -jar <jar> taint /app/wordpress \
+#     --include-files /home/so/zipper-test/wp-include-files.txt \
+#     --cpg-out /home/so/share/wp-chain/cpg.bin --output-dir /home/so/share/wp-chain \
+#     --custom-source /home/so/zipper-test/source.json --custom-navi default \
+#     --enable-include-scope --enable-global-data-dependency --enable-callback-flow \
+#     --enable-output-buffer --enable-template-sinks --enable-field-summary=class+global \
+#     --exclude-dirs=vendor,node_modules,uploads,upgrade,languages
+#
+# 语法：每行一个项目相对路径；支持 glob（* ? [ {）；以 / 结尾表示整个目录；# 之后是注释。
+# 保留范围：主流程（wp-includes 全量 + wp-admin 全量 + 主题全量）+ 7 个指定插件。
+
+# ---------- 引导 ----------
+index.php
+wp-blog-header.php
+wp-load.php
+wp-settings.php
+wp-config.php
+wp-config-sample.php
+
+# ---------- 提交入口 ----------
+wp-comments-post.php
+wp-login.php
+xmlrpc.php
+wp-admin/admin.php
+wp-admin/post.php
+wp-admin/post-new.php
+wp-admin/edit.php
+wp-admin/edit-comments.php
+wp-admin/comment.php
+wp-admin/includes/**
+
+# ---------- 核心库：净化(kses/formatting)、数据库(wp-db)、查询(WP_Query/Comment_Query)、
+#            模板标签(the_content/comment_text)、钩子(plugin/class-wp-hook)、REST ----------
+wp-includes/**
+
+# ---------- 主题（渲染出口：single.php / comments.php / template-parts）----------
+wp-content/themes/**
+
+# ---------- 插件（只扫这 7 个）----------
+wp-content/plugins/page-views-count/**
+wp-content/plugins/simple-icons/**
+wp-content/plugins/prismatic/**
+wp-content/plugins/post-duplicator/**
+wp-content/plugins/markup-markdown/**
+wp-content/plugins/gutenverse/**
+wp-content/plugins/duplicate-page-or-post/**
+
+# ---------- 其余插件暂不纳入（需要时逐行取消注释）----------
+# wp-content/plugins/elementor/**
+# wp-content/plugins/happy-elementor-addons/**
+# wp-content/plugins/events-manager/**
+# wp-content/plugins/fv-wordpress-flowplayer/**
+# wp-content/plugins/contact-form-by-supsystic/**
+# wp-content/plugins/if-so/**
+# wp-content/plugins/akismet/**
+# wp-content/plugins/cleantalk-spam-protect/**
+# wp-content/plugins/classic-editor/**
+# wp-content/plugins/improved-save-button/**
+# wp-content/plugins/responsive-lightbox/**
+# wp-content/plugins/icegram/**
+# wp-content/plugins/slider-hero/**
+
+# ---------- 明确不纳入的目录 ----------
+# wp-content/uploads/     （用户上传，不是代码）
+# wp-content/upgrade/
+# wp-includes/assets/     （前端资源）
+# wp-includes/blocks/     （块编辑器，200+ 文件，与这条链无关）
+# wp-includes/js/
+# wp-admin/css/
+# wp-admin/js/
+# --include-files 是白名单：本文件没列的都不会被分析。

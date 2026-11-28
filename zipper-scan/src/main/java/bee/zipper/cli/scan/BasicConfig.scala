@@ -52,6 +52,15 @@ class ProjectConfig {
   var excludeFiles: List[String] = new ArrayList[String]()
 
   @CommandLine.Option(
+    names = Array("--include-files"),
+    paramLabel = "<list-file>",
+    description = Array(
+      "Only analyse the files named in <list-file> (one project-relative path or glob per line, '#' for comments)"
+    )
+  )
+  var includeFiles: String = ""
+
+  @CommandLine.Option(
     names = Array("--load-cpg"),
     paramLabel = "<cpg-location>",
     description = Array("Use an existing CPG file instead of generating")

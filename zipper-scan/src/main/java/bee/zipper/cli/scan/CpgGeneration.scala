@@ -45,11 +45,19 @@ object CpgGeneration {
               .Option(basicConfig.cpgLocation)
               .filter(_.nonEmpty)
               .getOrElse(Paths.get(basicConfig.outputDir, "cpg.bin").toString)
+          if (pc.isLoadingCpgMode) {
+            logger.warn("--include-files only applies when a new CPG is generated; the loaded CPG is used as-is")
+          }
+          val includeExcludes =
+            scala.Option(pc.includeFiles).filter(_.nonEmpty) match {
+              case Some(listFile) => IncludeFilter.excludedPaths(new File(pc.path), listFile)
+              case None           => Seq.empty
+            }
           CpgGeneration.createCpg(
             pc.path,
             pc.language,
             pc.excludeDirs.asScala.toSeq,
-            pc.excludeFiles.asScala.toSeq,
+            pc.excludeFiles.asScala.toSeq ++ includeExcludes,
             basicConfig.outputDir,
             cpgLocation
           )
