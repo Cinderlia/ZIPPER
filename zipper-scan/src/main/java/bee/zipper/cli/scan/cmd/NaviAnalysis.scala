@@ -413,7 +413,12 @@ object NaviAnalysis {
               val renders = segmentPaths(NaviSegmentSpec("wpObject", "Xss"), controlFlow = false)
               nodeLevel ++ joinTableToWp(writePaths, perSegment.head._1, renders)
             } else {
-              nodeLevel ++ joinPathsByTable(perSegment.head._1, writePaths, requireContentTable = true)
+              nodeLevel ++ joinPathsByTable(
+                perSegment.head._1,
+                writePaths,
+                requireContentTable = true,
+                requireContentColumn = true
+              )
             }
           } else perSegment.map(_._1).reduceLeft((left, right) => joinPaths(left, right, bridgeWp))
         if (debug) logger.info(s"[navi-debug] ${chain.name}: join candidates=${joined.size} (bridge=$bridge)")
@@ -714,10 +719,18 @@ object NaviAnalysis {
       case _ => false
     }
 
+  /** A write targets user-visible content when it names a content column, or when the write payload carries one of
+    * those columns as an array key (`$wpdb->insert($wpdb->posts, array('post_content' => ...))`).
+    */
+  private def writesContentColumn(node: CfgNode): Boolean =
+    sqlColumns(node, writeSide = true).exists(wpContentFields.contains) ||
+      wpContentFields.exists(field => nodeText(node).contains(field))
+
   private def joinPathsByTable(
     left: List[TaintPath],
     right: List[TaintPath],
-    requireContentTable: Boolean = true
+    requireContentTable: Boolean = true,
+    requireContentColumn: Boolean = false
   ): List[TaintPath] = {
     val prefixes = left.map(path => (path, sqlTables(path.sink))).filter(_._2.nonEmpty)
     if (prefixes.isEmpty || right.isEmpty) Nil
@@ -733,7 +746,9 @@ object NaviAnalysis {
         writeNode     = if (prefixIsWrite) prefix.sink else suffix.sink
         readNode      = if (prefixIsWrite) suffix.sink else prefix.sink
         shared        = writeTables.intersect(readTables)
-        if shared.nonEmpty && tableJoinCompatible(writeNode, readNode, shared, requireContentTable)
+        contentColumn = !requireContentColumn || writesContentColumn(writeNode)
+        if shared.nonEmpty && contentColumn &&
+          tableJoinCompatible(writeNode, readNode, shared, requireContentTable)
       } yield TaintPath(
         suffix.kind,
         order = true,
