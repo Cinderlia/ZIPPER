@@ -77,33 +77,12 @@ object NaviConfig {
     * those properties later, so a read and its output are connected through `wpObject` rather than through the SQL read
     * call itself.
     */
-  val wordPressChains: List[NaviChainSpec] = List(
-    NaviChainSpec(
-      "wp-object",
-      List(NaviSegmentSpec("default", "sqlRead", Some("read")), NaviSegmentSpec("wpObject", "Xss", Some("render"))),
-      join = Some(true),
-      bridge = Some("wpRowToObject")
-    ),
-    NaviChainSpec(
-      "wp-table-xss",
-      List(
-        NaviSegmentSpec("default", "sqlWrite", Some("write")),
-        NaviSegmentSpec("default", "sqlRead", Some("read")),
-        NaviSegmentSpec("wpObject", "Xss", Some("render"))
-      ),
-      join = Some(true),
-      bridge = Some("table+wp")
-    )
-  )
-
   def default: NaviConfig = NaviConfig(defaultChains)
 
-  /** Built-in chain set. With WordPress support enabled two WordPress chains are appended: `wp-object` (a database row
-    * rendered through an object property) and `wp-table-xss` (a row written into a content table, read back from the
-    * same table and rendered). The table chain needs a table level join, which WordPress mode enables by default.
+  /** Built-in chain set. The set is the same in every mode: WordPress support changes how the segments of a chain are
+    * bridged, not which chains are reported, so the report layout stays stable for downstream tools.
     */
-  def default(wordpress: Boolean): NaviConfig =
-    NaviConfig(if (wordpress) defaultChains ++ wordPressChains else defaultChains)
+  def default(wordpress: Boolean): NaviConfig = NaviConfig(defaultChains)
 
   def load(path: String): NaviConfig = {
     val content = Files.readString(Paths.get(path))
