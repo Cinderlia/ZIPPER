@@ -195,12 +195,10 @@ class PHPTaintSourceSearcher(
           case call: Call if call.name == Operators.indexAccess && call.argument.size >= 2 =>
             val baseCode = call.argument(1).code
             val index    = call.argument(2)
-            // A literal key is the classic `$_POST['x']`; a variable key (`$_POST[$option]`) still reads an
-            // attacker-controlled entry, which is how WordPress option and settings pages dispatch their writes.
-            val keyed = (index.is[Literal] && index.as[Literal].isStr) || index.is[Identifier]
             !baseCode.contains("tmp") // joern tmp variable
             && baseCode == prev.code
-            && keyed
+            && index.is[Literal]
+            && index.as[Literal].isStr
           case _ => false
         }
       }

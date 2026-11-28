@@ -95,14 +95,6 @@ class TaintModule extends AppModule {
         // Casts only add edges, so they are applied to loaded CPGs as well.
         logger.info("Bridging type casts")
         new bee.zipper.core.cpgcreation.php.passes.CastFlowPass(cpg).createAndApply()
-        // Array element writes only add edges, so a loaded CPG gains them as well.
-        if (
-          (basicConfig.engineConfig.enableWordPress || basicConfig.engineConfig.enableArrayBuilders) &&
-          basicConfig.projectConfig.isLoadingCpgMode
-        ) {
-          logger.info("Bridging array element writes")
-          new bee.zipper.core.cpgcreation.php.passes.ArrayWriteFlowPass(cpg).createAndApply()
-        }
         // Same for the template sinks: they only add sink nodes and edges, so a CPG built by an earlier run can gain
         // them without being regenerated.
         if (basicConfig.engineConfig.enableTemplateSinks && basicConfig.projectConfig.isLoadingCpgMode) {
