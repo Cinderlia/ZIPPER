@@ -180,6 +180,24 @@ PHP 的 `extract($row)` 把数据库一行变成一组局部变量：`$aRow = my
 按 `.twig` 模板里的 `{{ var|raw }}` 造出合成 echo sink。**目前只造 sink，不打通“PHP 数组 → 模板变量”**，
 最小用例仍 0 条路径，暂不建议开。
 
+### 3.8 `--include-files=<清单文件>`（默认关）
+
+只分析清单里列出的文件，其余文件在解析前就被排除（把清单反转成 `ignoredFiles`，不建节点、不进后续 pass）。
+大工程（WordPress、openemr）用它与 `--exclude-dirs` 配合，把建图时间从几分钟压到几十秒。
+
+清单语法，每行一条，`#` 之后是注释：
+
+```
+wp-includes/**            # 整个子树
+wp-admin/includes/**      # 子目录
+wp-comments-post.php      # 单个文件
+!wp-includes/blocks/**    # `!` 前缀从前面更宽的条目里剔除
+```
+
+- 只在**新建 CPG** 时生效；`--load-cpg` 会打 warning（已建好的图无法再裁）。
+- 日志会打印 `--include-files: keeping N of M files`，对不上就说明清单写错了。
+- WordPress 现成清单：`docs/wp-include-files.txt`（主流程 + 7 个插件，4,237 / 13,931 个文件）。
+
 ---
 
 ## 4. 引擎/通用开关（有默认值，按需）

@@ -20,14 +20,22 @@ import scala.util.Using
   *   - `wp-includes/(star).php` one directory level, e.g. all PHP files in wp-includes
   *   - `wp-content/plugins/my-plugin/(star)(star)` whole subtree of one plugin
   *   - `wp-admin/` a trailing slash keeps a whole directory
+  *   - `!wp-includes/blocks/(star)(star)` a leading `!` removes matches of an earlier, broader entry
   *
-  * In the list file itself `(star)` is a literal asterisk.
+  * In the list file itself `(star)` is a literal asterisk. Negations are applied after the positive entries.
   */
 object IncludeFilter {
   private val logger = LoggerFactory.getLogger(this.getClass)
 
   private def isGlob(entry: String): Boolean =
     entry.exists(c => c == '*' || c == '?' || c == '[' || c == '{')
+
+  /** A `!` prefix turns an entry into an exclusion, applied after the positive match: a broad entry such as
+    * `wp-includes/(star)(star)` can be narrowed by `!wp-includes/blocks/(star)(star)`.
+    */
+  private def isNegated(entry: String): Boolean = entry.startsWith("!")
+
+  private def stripNegation(entry: String): String = if isNegated(entry) then entry.drop(1).trim else entry
 
   private def readEntries(listFile: String): Seq[String] =
     Using.resource(Files.newBufferedReader(Paths.get(listFile), StandardCharsets.UTF_8)) { reader =>
@@ -52,14 +60,25 @@ object IncludeFilter {
     }
 
     val fs        = FileSystems.getDefault
-    val matchers  = entries.filter(isGlob).map(e => fs.getPathMatcher("glob:" + e))
-    val exact     = entries.filterNot(isGlob).filterNot(_.endsWith("/")).toSet
-    val dirPrefix = entries.filterNot(isGlob).filter(_.endsWith("/")).map(_.stripSuffix("/") + "/")
+    val positives = entries.filterNot(isNegated).map(stripNegation)
+    val negatives = entries.filter(isNegated).map(stripNegation)
+
+    def matchersOf(items: Seq[String]) = items.filter(isGlob).map(e => fs.getPathMatcher("glob:" + e))
+    def exactOf(items: Seq[String])    = items.filterNot(isGlob).filterNot(_.endsWith("/")).toSet
+    def dirsOf(items: Seq[String])     = items.filterNot(isGlob).filter(_.endsWith("/")).map(_.stripSuffix("/") + "/")
+
+    val posMatchers = matchersOf(positives)
+    val posExact    = exactOf(positives)
+    val posDirs     = dirsOf(positives)
+    val negMatchers = matchersOf(negatives)
+    val negExact    = exactOf(negatives)
+    val negDirs     = dirsOf(negatives)
+
+    def matches(relative: String, ex: Set[String], dirs: Seq[String], ms: Seq[java.nio.file.PathMatcher]): Boolean =
+      ex.contains(relative) || dirs.exists(relative.startsWith) || ms.exists(_.matches(Paths.get(relative)))
 
     def included(relative: String): Boolean =
-      exact.contains(relative) ||
-        dirPrefix.exists(relative.startsWith) ||
-        matchers.exists(_.matches(Paths.get(relative)))
+      matches(relative, posExact, posDirs, posMatchers) && !matches(relative, negExact, negDirs, negMatchers)
 
     var kept     = 0
     var excluded = 0
